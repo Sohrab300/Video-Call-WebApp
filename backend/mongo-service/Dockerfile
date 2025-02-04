@@ -1,14 +1,14 @@
-# Dockerfile for MongoDB with TLS
+# Use the official MongoDB image
 FROM mongo:latest
 
 # Copy the PEM file into the container
 COPY mongodb.pem /etc/ssl/mongodb.pem
 
-# Ensure the PEM file has the correct permissions (optional, if needed)
+# Set appropriate permissions on the PEM file
 RUN chmod 600 /etc/ssl/mongodb.pem
 
-# Expose MongoDB default port
+# Expose the default MongoDB port
 EXPOSE 27017
 
-# Start MongoDB with TLS enabled
-CMD ["mongod", "--tlsMode", "requireTLS", "--tlsCertificateKeyFile", "/etc/ssl/mongodb.pem"]
+# Start MongoDB with TLS enabled and provide the CA file (using the same PEM for self-signed)
+CMD ["mongod", "--tlsMode", "requireTLS", "--tlsCertificateKeyFile", "/etc/ssl/mongodb.pem", "--tlsCAFile", "/etc/ssl/mongodb.pem"]
