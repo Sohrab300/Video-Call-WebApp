@@ -3,12 +3,14 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
-const mongoose = require('mongoose');
+const sequelize = require('./database'); // PostgreSQL connection via Sequelize
+const { Op } = require('sequelize'); // Sequelize operators
+const stringSimilarity = require('string-similarity'); // For cosine similarity
 
-// Import the Interest model (ensure the file name and export match)
+// Import the Interest model (now a Sequelize model)
 const Interest = require('./models/Interest');
 
-// Import the interests API router
+// Import the interests API router (update it separately to use Sequelize if needed)
 const interestsRouter = require('./routes/interests');
 
 const app = express();
@@ -26,75 +28,113 @@ const io = socketIo(server, {
   cors: { origin: '*' },
 });
 
-// Connect to MongoDB
-const mongoURI = 'mongodb://localhost:27017/videoCallApp'; // Change as needed
-mongoose.connect(mongoURI)
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.error('MongoDB connection error:', err));
+// Connect to PostgreSQL and sync models
+sequelize.authenticate()
+  .then(() => console.log('PostgreSQL connected'))
+  .catch(err => console.error('PostgreSQL connection error:', err));
+
+sequelize.sync() // This will create tables if they don't exist
+  .then(() => console.log('Sequelize models synchronized'))
+  .catch(err => console.error('Error synchronizing Sequelize models:', err));
 
 // Socket.IO connection handler
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
-  // Handle interest submissions and store in MongoDB
+  // Handle interest submissions and store in PostgreSQL using cosine similarity matching
   socket.on('submitInterest', async ({ interest }) => {
     console.log(`User ${socket.id} submitted interest: ${interest}`);
 
-    // Save the new interest document in MongoDB
+    // Save the new interest record in PostgreSQL using Sequelize
     let newInterest;
     try {
-      newInterest = new Interest({
+      newInterest = await Interest.create({
         socketId: socket.id,
         interest: interest,
         matched: false,
       });
-      await newInterest.save();
-      console.log('Interest saved to MongoDB:', newInterest);
+      console.log('Interest saved to PostgreSQL:', newInterest.toJSON());
     } catch (error) {
       console.error('Error saving interest:', error);
       return;
     }
 
-    // Query MongoDB for an existing unmatched interest with the same value (and a different socketId)
+    // Fetch all unmatched interests from other sockets
+    let unmatchedInterests;
     try {
-      const otherInterest = await Interest.findOne({
-        interest: interest,
-        matched: false,
-        socketId: { $ne: socket.id },
+      unmatchedInterests = await Interest.findAll({
+        where: {
+          matched: false,
+          socketId: { [Op.ne]: socket.id },
+        },
       });
-
-      if (otherInterest) {
-        // We found a match!
-        const roomId = `${interest}-${Date.now()}`;
-
-        // Update both interest records as matched with the roomId
-        await Interest.findByIdAndUpdate(newInterest._id, { matched: true, roomId });
-        await Interest.findByIdAndUpdate(otherInterest._id, { matched: true, roomId });
-        console.log(`Match found for interest "${interest}" in room ${roomId}`);
-
-        // Have both sockets join the same room
-        socket.join(roomId);
-        io.to(otherInterest.socketId).socketsJoin(roomId);
-
-        // Emit the matchFound event to both clients
-        io.to(socket.id).emit('matchFound', { roomId, isInitiator: true });
-        io.to(otherInterest.socketId).emit('matchFound', { roomId, isInitiator: false });
-      }
-      // If no match is found, the new record remains unmatched in the DB until another submission arrives.
     } catch (err) {
-      console.error('Error matching interests:', err);
+      console.error('Error fetching unmatched interests:', err);
+      return;
     }
+
+    if (!unmatchedInterests || unmatchedInterests.length === 0) {
+      // No other unmatched interest exists.
+      return;
+    }
+
+    // Compute cosine similarity (using string-similarity) for each unmatched interest
+    let bestMatch = null;
+    let bestScore = 0;
+    unmatchedInterests.forEach(interestRecord => {
+      // Convert both strings to lower case for case-insensitive comparison
+      const score = stringSimilarity.compareTwoStrings(
+        interest.toLowerCase(), 
+        interestRecord.interest.toLowerCase()
+      );
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = interestRecord;
+      }
+    });
+
+    // Set a threshold for similarity (e.g., 0.7 means 70% similarity)
+    const threshold = 0.7;
+    if (bestScore >= threshold && bestMatch) {
+      const roomId = `${interest}-${Date.now()}`;
+      
+      // Update both interest records as matched with the roomId
+      try {
+        await Interest.update(
+          { matched: true, roomId },
+          { where: { id: newInterest.id } }
+        );
+        await Interest.update(
+          { matched: true, roomId },
+          { where: { id: bestMatch.id } }
+        );
+      } catch (err) {
+        console.error('Error updating matched interests:', err);
+        return;
+      }
+      
+      console.log(`Match found between "${interest}" and "${bestMatch.interest}" (score: ${bestScore}) in room ${roomId}`);
+
+      // Have both sockets join the same room
+      socket.join(roomId);
+      io.to(bestMatch.socketId).socketsJoin(roomId);
+
+      // Emit the matchFound event to both clients
+      io.to(socket.id).emit('matchFound', { roomId, isInitiator: true });
+      io.to(bestMatch.socketId).emit('matchFound', { roomId, isInitiator: false });
+    }
+    // If no match meets the threshold, the new record remains unmatched in the DB until another submission arrives.
   });
 
   // Relay signaling messages
   socket.on('offer', ({ offer, roomId }) => {
     socket.to(roomId).emit('offer', { offer });
   });
-  
+
   socket.on('answer', ({ answer, roomId }) => {
     socket.to(roomId).emit('answer', { answer });
   });
-  
+
   socket.on('iceCandidate', ({ candidate, roomId }) => {
     socket.to(roomId).emit('iceCandidate', { candidate });
   });
@@ -103,7 +143,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id);
     try {
-      await Interest.deleteMany({ socketId: socket.id, matched: false });
+      await Interest.destroy({ where: { socketId: socket.id, matched: false } });
     } catch (err) {
       console.error('Error cleaning up interests on disconnect:', err);
     }

@@ -1,12 +1,28 @@
-// backend/models/Interest.js
-const mongoose = require('mongoose');
+// models/Interest.js
+const { DataTypes } = require('sequelize');
+const sequelize = require('../database'); // adjust path if necessary
 
-const interestSchema = new mongoose.Schema({
-  socketId: { type: String, required: true },
-  interest: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now },
-  matched: { type: Boolean, default: false },
-  roomId: { type: String } // optional: to store the room ID when matched
+const Interest = sequelize.define('Interest', {
+  // Auto-generated primary key id is provided by default.
+  socketId: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  interest: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  matched: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  roomId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+}, {
+  timestamps: true, // This will add createdAt and updatedAt fields
+  updatedAt: false, // If you don’t need updatedAt, you can disable it.
 });
 
-module.exports = mongoose.model('Interest', interestSchema);
+module.exports = Interest;
