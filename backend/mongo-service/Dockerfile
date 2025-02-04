@@ -4,8 +4,8 @@ FROM mongo:latest
 # Copy the PEM file into the container
 COPY mongodb.pem /etc/ssl/mongodb.pem
 
-# Set appropriate permissions on the PEM file
-RUN chmod 600 /etc/ssl/mongodb.pem
+# Change the owner to the 'mongodb' user and set appropriate permissions
+RUN chown mongodb:mongodb /etc/ssl/mongodb.pem && chmod 600 /etc/ssl/mongodb.pem
 
 # Expose the default MongoDB port
 EXPOSE 27017
