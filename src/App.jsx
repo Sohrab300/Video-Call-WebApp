@@ -5,7 +5,7 @@ import io from "socket.io-client";
 import CameraPreview from "./components/CameraPreview";
 
 // Connect to the backend server on port 3000
-const socket = io("http://localhost:3000");
+const socket = io("https://video-call-webapp-r9a2.onrender.com");
 
 function App() {
   const [callData, setCallData] = useState(null);
