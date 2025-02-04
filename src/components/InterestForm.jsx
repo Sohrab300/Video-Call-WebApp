@@ -3,11 +3,19 @@ import React, { useState } from "react";
 
 function InterestForm({ onSubmit }) {
   const [interest, setInterest] = useState("");
+  const [isDisabled, setIsDisabled] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    // Call the onSubmit prop passed from the parent
     onSubmit(interest);
+
+    // Disable the submit button
+    setIsDisabled(true);
+
+    // Re-enable the button after 10 seconds (10000 milliseconds)
+    setTimeout(() => {
+      setIsDisabled(false);
+    }, 2000);
   };
 
   return (
@@ -24,11 +32,17 @@ function InterestForm({ onSubmit }) {
             type="text"
             id="interest"
             value={interest}
-            className=" bg-pink-50 rounded-md mx-2"
+            className="bg-pink-50 rounded-md mx-2"
             onChange={(e) => setInterest(e.target.value)}
             required
           />
-          <button className="bg-pink-400 p-1 rounded-md" type="submit">
+          <button
+            type="submit"
+            disabled={isDisabled}
+            className={`p-1 rounded-md ${
+              isDisabled ? "bg-gray-400" : "bg-pink-400"
+            }`}
+          >
             Submit
           </button>
         </span>
