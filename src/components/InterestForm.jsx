@@ -11,22 +11,27 @@ function InterestForm({ onSubmit }) {
   };
 
   return (
-    <div className="flex justify-center items-center mt-8">
-      <form onSubmit={handleSubmit}>
+    <div className="flex justify-center items-center mt-4 md:mt-8">
+      <form
+        className="flex flex-col justify-center items-center gap-2 md:block"
+        onSubmit={handleSubmit}
+      >
         <label className="font-bold" htmlFor="interest">
           Enter your interest or hobby:
         </label>
-        <input
-          type="text"
-          id="interest"
-          value={interest}
-          className=" bg-pink-50 rounded-md mx-2"
-          onChange={(e) => setInterest(e.target.value)}
-          required
-        />
-        <button className="bg-pink-400 p-1 rounded-md" type="submit">
-          Submit
-        </button>
+        <span>
+          <input
+            type="text"
+            id="interest"
+            value={interest}
+            className=" bg-pink-50 rounded-md mx-2"
+            onChange={(e) => setInterest(e.target.value)}
+            required
+          />
+          <button className="bg-pink-400 p-1 rounded-md" type="submit">
+            Submit
+          </button>
+        </span>
       </form>
     </div>
   );

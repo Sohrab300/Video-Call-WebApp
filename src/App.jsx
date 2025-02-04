@@ -31,7 +31,7 @@ function App() {
       <div className="container bg-pink-100 min-h-screen min-w-full">
         <div className="header flex justify-center items-center text-5xl font-bold h-[10vh]">
           <h1>
-            Golmaal<span className="text-pink-500">.org</span>
+            Skibidi<span className="text-pink-500">.org</span>
           </h1>
         </div>
         <div className="App">

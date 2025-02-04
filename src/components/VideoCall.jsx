@@ -109,14 +109,14 @@ function VideoCall({ callData, socket }) {
 
   return (
     <>
-      <div className="container p-5 text-center items-center justify-center flex gap-8 min-w-screen mt-22">
+      <div className="container p-5 text-center items-center justify-center flex flex-col md:flex-row gap-4 md:gap-8 min-w-screen md:mt-22">
         <div className="flex flex-col justify-center items-center">
           {" "}
-          <video className=" w-xl" ref={localVideoRef} autoPlay muted />
+          <video className="w-2xs md:w-xl" ref={localVideoRef} autoPlay muted />
           <h2 className="">Your Camera Preview</h2>
         </div>
         <div className="flex flex-col justify-center items-center">
-          <video className=" w-xl" ref={remoteVideoRef} autoPlay />
+          <video className="w-2xs md:w-xl" ref={remoteVideoRef} autoPlay />
           <h2 className="">Buddy's Camera Preview</h2>
         </div>
       </div>
