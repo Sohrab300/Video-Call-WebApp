@@ -22,7 +22,7 @@ function App() {
   }, []);
 
   const handleInterestSubmit = (interest) => {
-    // Emit the interest to the backend
+    // Sends the interest to the backend
     socket.emit("submitInterest", { interest });
   };
 

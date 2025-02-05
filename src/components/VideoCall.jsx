@@ -1,4 +1,3 @@
-// src/components/VideoCall.jsx
 import React, { useEffect, useRef } from "react";
 
 function VideoCall({ callData, socket }) {
@@ -7,7 +6,6 @@ function VideoCall({ callData, socket }) {
   const peerConnection = useRef(null);
 
   useEffect(() => {
-    // Wrap everything in an async function so we can await getUserMedia and a delay
     const startCall = async () => {
       const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 

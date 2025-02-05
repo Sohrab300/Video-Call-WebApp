@@ -1,4 +1,3 @@
-// src/components/CameraPreview.jsx
 import React, { useEffect, useRef } from "react";
 
 function CameraPreview() {

@@ -1,4 +1,3 @@
-// src/components/InterestForm.jsx
 import React, { useState } from "react";
 
 function InterestForm({ onSubmit }) {
@@ -9,10 +8,8 @@ function InterestForm({ onSubmit }) {
     e.preventDefault();
     onSubmit(interest);
 
-    // Disable the submit button
     setIsDisabled(true);
 
-    // Re-enable the button after 10 seconds (10000 milliseconds)
     setTimeout(() => {
       setIsDisabled(false);
     }, 2000);

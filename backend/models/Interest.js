@@ -1,4 +1,3 @@
-// models/Interest.js
 const { DataTypes } = require('sequelize');
 const sequelize = require('../database'); // adjust path if necessary
 

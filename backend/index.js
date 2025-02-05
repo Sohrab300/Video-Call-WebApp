@@ -1,16 +1,15 @@
-// backend/index.js
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
-const sequelize = require('./database'); // PostgreSQL connection via Sequelize
-const { Op } = require('sequelize'); // Sequelize operators
-const stringSimilarity = require('string-similarity'); // For cosine similarity
+const sequelize = require('./database');
+const { Op } = require('sequelize');
+const stringSimilarity = require('string-similarity');
 
-// Import the Interest model (now a Sequelize model)
+// Import the Interest model
 const Interest = require('./models/Interest');
 
-// Import the interests API router (update it separately to use Sequelize if needed)
+// Import the interests API router
 const interestsRouter = require('./routes/interests');
 
 const app = express();
@@ -45,7 +44,7 @@ io.on('connection', (socket) => {
   socket.on('submitInterest', async ({ interest }) => {
     console.log(`User ${socket.id} submitted interest: ${interest}`);
 
-    // Save the new interest record in PostgreSQL using Sequelize
+    // Save the new interest record
     let newInterest;
     try {
       newInterest = await Interest.create({
@@ -78,7 +77,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Compute cosine similarity (using string-similarity) for each unmatched interest
+    // Compute string-similarity for each unmatched interest
     let bestMatch = null;
     let bestScore = 0;
     unmatchedInterests.forEach(interestRecord => {

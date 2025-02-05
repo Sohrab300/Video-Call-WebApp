@@ -1,4 +1,3 @@
-// database.js
 const { Sequelize } = require('sequelize');
 
 // Use the DATABASE_URL environment variable if available, otherwise fall back to your Render connection string.
