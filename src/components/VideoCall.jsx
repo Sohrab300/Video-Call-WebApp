@@ -85,7 +85,10 @@ function VideoCall({ callData, socket }) {
       // If this client is the initiator, create and send an offer now that tracks are added
       if (callData.isInitiator) {
         try {
-          const offer = await peerConnection.current.createOffer();
+          const offer = await peerConnection.current.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true,
+          });
           await peerConnection.current.setLocalDescription(offer);
           socket.emit("offer", { offer, roomId: callData.roomId });
         } catch (err) {
