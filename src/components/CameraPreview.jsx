@@ -14,15 +14,17 @@ function CameraPreview() {
   }, []);
 
   return (
-    <div className="container p-5 text-center items-center justify-center flex flex-col min-w-screen md:mt-22 ">
-      <video
-        className="w-xs md:w-xl"
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-      />
-      <h2 className="">Your Camera Preview</h2>
+    <div className="container p-5 text-center flex flex-col justify-center items-center min-w-screen md:mt-22">
+      <div className="w-xs md:w-xl aspect-video bg-black">
+        <video
+          className="w-full h-full object-contain"
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+        />
+      </div>
+      <h2>Your Camera Preview</h2>
     </div>
   );
 }
