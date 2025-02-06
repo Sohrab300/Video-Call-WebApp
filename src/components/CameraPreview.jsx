@@ -15,7 +15,7 @@ function CameraPreview() {
 
   return (
     <div className="container p-5 text-center flex flex-col justify-center items-center min-w-screen md:mt-22">
-      <div className="w-xs md:w-xl aspect-video bg-black">
+      <div className="w-xs md:w-xls bg-black">
         <video
           className="w-full h-full object-contain"
           ref={videoRef}
