@@ -15,7 +15,13 @@ function CameraPreview() {
 
   return (
     <div className="container p-5 text-center items-center justify-center flex flex-col min-w-screen md:mt-22 ">
-      <video className="w-xs md:w-xl" ref={videoRef} autoPlay muted />
+      <video
+        className="w-xs md:w-xl"
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+      />
       <h2 className="">Your Camera Preview</h2>
     </div>
   );
