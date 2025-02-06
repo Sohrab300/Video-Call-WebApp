@@ -112,7 +112,7 @@ function VideoCall({ callData, socket }) {
     <>
       <div className="container p-5 text-center flex flex-col md:flex-row gap-4 md:gap-8 min-w-screen md:mt-22">
         <div className="flex flex-col justify-center items-center">
-          <div className="w-2xs md:w-xl aspect-video bg-black">
+          <div className="w-2xs md:w-xl bg-black">
             <video
               className="w-full h-full object-contain"
               ref={localVideoRef}
@@ -124,7 +124,7 @@ function VideoCall({ callData, socket }) {
           <h2>Your Camera Preview</h2>
         </div>
         <div className="flex flex-col justify-center items-center">
-          <div className="w-2xs md:w-xl aspect-video bg-black">
+          <div className="w-2xs md:w-xl bg-black">
             <video
               className="w-full h-full object-contain"
               ref={remoteVideoRef}
