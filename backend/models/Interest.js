@@ -1,8 +1,8 @@
+// models/Interest.js
 const { DataTypes } = require('sequelize');
-const sequelize = require('../database'); // adjust path if necessary
+const sequelize = require('../database');
 
 const Interest = sequelize.define('Interest', {
-  // Auto-generated primary key id is provided by default.
   socketId: {
     type: DataTypes.STRING,
     allowNull: false,
@@ -19,9 +19,13 @@ const Interest = sequelize.define('Interest', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  embedding: {
+    type: DataTypes.JSON,
+    allowNull: false,
+  },
 }, {
-  timestamps: true, // This will add createdAt and updatedAt fields
-  updatedAt: false, // If you don’t need updatedAt, you can disable it.
+  timestamps: true,
+  updatedAt: false,
 });
 
 module.exports = Interest;

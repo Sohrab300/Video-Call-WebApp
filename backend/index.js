@@ -1,55 +1,67 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const sequelize = require('./database');
 const { Op } = require('sequelize');
-const stringSimilarity = require('string-similarity');
+const getEmbedding = require('./utils/getEmbedding'); // New utility for embeddings
 
-// Import the Interest model
 const Interest = require('./models/Interest');
-
-// Import the interests API router
 const interestsRouter = require('./routes/interests');
 
 const app = express();
 app.use(cors());
-
-// Middleware to parse JSON request bodies
 app.use(express.json());
-
-// Mount the interests API router under /api/interests
 app.use('/api/interests', interestsRouter);
 
-// Create the HTTP server and initialize Socket.IO
 const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: { origin: '*' },
-});
+const io = socketIo(server, { cors: { origin: '*' } });
 
-// Connect to PostgreSQL and sync models
 sequelize.authenticate()
   .then(() => console.log('PostgreSQL connected'))
   .catch(err => console.error('PostgreSQL connection error:', err));
 
-sequelize.sync() // This will create tables if they don't exist
+// For development, we're forcing table recreation. In production, use migrations.
+sequelize.sync({ force: true })
   .then(() => console.log('Sequelize models synchronized'))
   .catch(err => console.error('Error synchronizing Sequelize models:', err));
 
-// Socket.IO connection handler
+
+// Helper function to normalize a vector
+const normalize = (vec) => {
+  const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
+  return vec.map(val => val / magnitude);
+};
+
+// Updated cosine similarity function using normalized vectors
+const cosineSimilarity = (vecA, vecB) => {
+  const normA = normalize(vecA);
+  const normB = normalize(vecB);
+  // Compute dot product of normalized vectors
+  return normA.reduce((sum, a, i) => sum + a * normB[i], 0);
+};
+
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
-  // Handle interest submissions and store in PostgreSQL using cosine similarity matching
   socket.on('submitInterest', async ({ interest }) => {
     console.log(`User ${socket.id} submitted interest: ${interest}`);
 
-    // Save the new interest record
+    // Get vector embedding for the submitted interest
+    const embedding = await getEmbedding(interest);
+    if (!embedding) {
+      console.error('Failed to get embedding for interest.');
+      return;
+    }
+
+    // Save the new interest record along with its embedding
     let newInterest;
     try {
       newInterest = await Interest.create({
         socketId: socket.id,
-        interest: interest,
+        interest,
+        embedding,
         matched: false,
       });
       console.log('Interest saved to PostgreSQL:', newInterest.toJSON());
@@ -73,56 +85,39 @@ io.on('connection', (socket) => {
     }
 
     if (!unmatchedInterests || unmatchedInterests.length === 0) {
-      // No other unmatched interest exists.
       return;
     }
 
-    // Compute string-similarity for each unmatched interest
+    // Compare the new embedding with each unmatched embedding using cosine similarity
     let bestMatch = null;
     let bestScore = 0;
-    unmatchedInterests.forEach(interestRecord => {
-      // Convert both strings to lower case for case-insensitive comparison
-      const score = stringSimilarity.compareTwoStrings(
-        interest.toLowerCase(), 
-        interestRecord.interest.toLowerCase()
-      );
+    for (const interestRecord of unmatchedInterests) {
+      if (!interestRecord.embedding) continue;
+      const score = cosineSimilarity(embedding, interestRecord.embedding);
+      console.log(`Similarity score between "${interest}" and "${interestRecord.interest}": ${score}`);
       if (score > bestScore) {
         bestScore = score;
         bestMatch = interestRecord;
       }
-    });
+    }
 
-    // Set a threshold for similarity (e.g., 0.7 means 70% similarity)
-    const threshold = 0.7;
+    // Define a threshold for similarity (e.g., 0.8)
+    const threshold = 0.1;
     if (bestScore >= threshold && bestMatch) {
       const roomId = `${interest}-${Date.now()}`;
-      
-      // Update both interest records as matched with the roomId
       try {
-        await Interest.update(
-          { matched: true, roomId },
-          { where: { id: newInterest.id } }
-        );
-        await Interest.update(
-          { matched: true, roomId },
-          { where: { id: bestMatch.id } }
-        );
+        await Interest.update({ matched: true, roomId }, { where: { id: newInterest.id } });
+        await Interest.update({ matched: true, roomId }, { where: { id: bestMatch.id } });
       } catch (err) {
         console.error('Error updating matched interests:', err);
         return;
       }
-      
       console.log(`Match found between "${interest}" and "${bestMatch.interest}" (score: ${bestScore}) in room ${roomId}`);
-
-      // Have both sockets join the same room
       socket.join(roomId);
       io.to(bestMatch.socketId).socketsJoin(roomId);
-
-      // Emit the matchFound event to both clients
       io.to(socket.id).emit('matchFound', { roomId, isInitiator: true });
       io.to(bestMatch.socketId).emit('matchFound', { roomId, isInitiator: false });
     }
-    // If no match meets the threshold, the new record remains unmatched in the DB until another submission arrives.
   });
 
   // Relay signaling messages
@@ -138,7 +133,6 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('iceCandidate', { candidate });
   });
 
-  // Cleanup on disconnect: remove any unmatched interest records for this socket
   socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id);
     try {
@@ -149,6 +143,5 @@ io.on('connection', (socket) => {
   });
 });
 
-// Start the server on the specified port
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
