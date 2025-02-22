@@ -4,17 +4,23 @@ function CameraPreview() {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    // Request only video (or video and audio, if desired)
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: false })
       .then((stream) => {
         videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current
+            .play()
+            .catch((err) =>
+              console.error("Error playing camera preview:", err)
+            );
+        };
       })
       .catch((err) => console.error("Error accessing camera:", err));
   }, []);
 
   return (
-    <div className="container p-5 text-center items-center justify-center flex flex-col min-w-screen md:mt-22 ">
+    <div className="container p-5 text-center items-center justify-center flex flex-col min-w-screen md:mt-22">
       <video
         className="w-xs md:w-xl"
         ref={videoRef}
@@ -22,7 +28,7 @@ function CameraPreview() {
         muted
         playsInline
       />
-      <h2 className="">Your Camera Preview</h2>
+      <h2>Your Camera Preview</h2>
     </div>
   );
 }
