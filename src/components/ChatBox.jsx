@@ -86,7 +86,7 @@ const ChatBox = ({ socket, roomId }) => {
             <div
               key={index}
               className={`message p-2 my-1 rounded w-fit max-w-full break-words ${
-                isCurrentUser ? "ml-auto bg-blue-200" : "mr-auto bg-gray-100"
+                isCurrentUser ? "ml-auto bg-blue-200" : "mr-auto bg-gray-200"
               }`}
             >
               <span>{msg.text}</span>
