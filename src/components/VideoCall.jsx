@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import ChatBox from "./ChatBox"; // import ChatBox
 
 function VideoCall({ callData, socket }) {
   const localVideoRef = useRef(null);
@@ -112,7 +113,7 @@ function VideoCall({ callData, socket }) {
 
     startCall();
 
-    // Cleanup on unmount
+    // Cleanup on component unmount
     return () => {
       if (peerConnection.current) peerConnection.current.close();
       socket.off("offer");
@@ -122,25 +123,32 @@ function VideoCall({ callData, socket }) {
   }, [callData, socket]);
 
   return (
-    <div className="container p-5 text-center items-center justify-center flex flex-col md:flex-row gap-4 md:gap-8 min-w-screen md:mt-22">
-      <div className="flex flex-col justify-center items-center">
-        <video
-          className="w-2xs md:w-xl"
-          ref={localVideoRef}
-          autoPlay
-          muted
-          playsInline
-        />
-        <h2>Your Camera Preview</h2>
+    <div className="container h-[75vh] p-5 text-center items-center justify-center flex flex-col md:flex-row gap-4 md:gap-8 min-w-screen md:mt-10">
+      <div className="flex flex-col">
+        <div className="flex flex-col justify-center items-center">
+          <video
+            className="w-2xs md:w-[50%]"
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            style={{ transform: "scaleX(-1)" }}
+          />
+          <h2>Your Camera Preview</h2>
+        </div>
+        <div className="flex flex-col justify-center items-center">
+          <video
+            className="w-2xs md:w-[50%]"
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            style={{ transform: "scaleX(-1)" }}
+          />
+          <h2>Buddy's Camera Preview</h2>
+        </div>
       </div>
-      <div className="flex flex-col justify-center items-center">
-        <video
-          className="w-2xs md:w-xl"
-          ref={remoteVideoRef}
-          autoPlay
-          playsInline
-        />
-        <h2>Buddy's Camera Preview</h2>
+      <div className="h-[100%] w-[50%] flex items-center justify-center">
+        <ChatBox socket={socket} roomId={callData.roomId} />
       </div>
     </div>
   );

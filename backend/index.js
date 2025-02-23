@@ -133,13 +133,25 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('iceCandidate', { candidate });
   });
 
+  // Listen for chat messages
+  socket.on("chatMessage", (data) => {
+    console.log("Chat message received:", data);
+    // Broadcast the message to other clients in the same room
+    socket.to(data.roomId).emit("chatMessage", data);
+  });
+
+   // Emit the updated user count to everyone
+   io.emit("updateUserCount", io.engine.clientsCount);
+
   socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id);
-    try {
-      await Interest.destroy({ where: { socketId: socket.id, matched: false } });
-    } catch (err) {
-      console.error('Error cleaning up interests on disconnect:', err);
-    }
+     // Emit the updated user count when a client disconnects
+     io.emit("updateUserCount", io.engine.clientsCount);
+     try {
+       await Interest.destroy({ where: { socketId: socket.id, matched: false } });
+     } catch (err) {
+       console.error("Error cleaning up interests on disconnect:", err);
+     }
   });
 });
 

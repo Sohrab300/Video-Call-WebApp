@@ -16,7 +16,7 @@ function InterestForm({ onSubmit }) {
   };
 
   return (
-    <div className="flex justify-center items-center mt-4 md:mt-8">
+    <div className="flex justify-center items-center mt-4 md:mt-12">
       <form
         className="flex flex-col justify-center items-center gap-2 md:block"
         onSubmit={handleSubmit}
