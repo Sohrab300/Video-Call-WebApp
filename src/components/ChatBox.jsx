@@ -107,7 +107,7 @@ const ChatBox = ({ socket, roomId }) => {
         </button>
         <input
           type="text"
-          className="border p-2 border-l-0 flex-grow"
+          className="border p-2 border-l-0 flex-grow focus:outline-none"
           placeholder="Type your message..."
           value={message}
           onChange={(e) => setMessage(e.target.value)}
