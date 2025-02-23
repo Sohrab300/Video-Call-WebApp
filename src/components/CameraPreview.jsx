@@ -27,6 +27,7 @@ function CameraPreview() {
         autoPlay
         muted
         playsInline
+        style={{ transform: "scaleX(-1)" }}
       />
       <h2>Your Camera Preview</h2>
     </div>

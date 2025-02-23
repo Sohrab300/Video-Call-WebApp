@@ -10,7 +10,21 @@ const getEmbedding = require('./utils/getEmbedding'); // New utility for embeddi
 const Interest = require('./models/Interest');
 const interestsRouter = require('./routes/interests');
 
+// Import rate limit middleware
+const rateLimit = require('express-rate-limit');
+
 const app = express();
+
+// Set up rate limiting (e.g., 100 requests per 15 minutes per IP)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50, // limit each IP to 100 requests per window
+  message: "Too many requests from this IP, please try again after 15 minutes.",
+});
+
+// Apply the rate limiter to all requests
+app.use(limiter);
+
 app.use(cors());
 app.use(express.json());
 app.use('/api/interests', interestsRouter);
@@ -101,7 +115,7 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Define a threshold for similarity (e.g., 0.8)
+    // Define a threshold for similarity (e.g., 0.1 in your code)
     const threshold = 0.1;
     if (bestScore >= threshold && bestMatch) {
       const roomId = `${interest}-${Date.now()}`;
@@ -140,18 +154,18 @@ io.on('connection', (socket) => {
     socket.to(data.roomId).emit("chatMessage", data);
   });
 
-   // Emit the updated user count to everyone
-   io.emit("updateUserCount", io.engine.clientsCount);
+  // Emit the updated user count to everyone
+  io.emit("updateUserCount", io.engine.clientsCount);
 
   socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id);
-     // Emit the updated user count when a client disconnects
-     io.emit("updateUserCount", io.engine.clientsCount);
-     try {
-       await Interest.destroy({ where: { socketId: socket.id, matched: false } });
-     } catch (err) {
-       console.error("Error cleaning up interests on disconnect:", err);
-     }
+    // Emit the updated user count when a client disconnects
+    io.emit("updateUserCount", io.engine.clientsCount);
+    try {
+      await Interest.destroy({ where: { socketId: socket.id, matched: false } });
+    } catch (err) {
+      console.error("Error cleaning up interests on disconnect:", err);
+    }
   });
 });
 
