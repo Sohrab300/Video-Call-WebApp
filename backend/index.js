@@ -28,7 +28,12 @@ const limiter = rateLimit({
 // Apply the rate limiter to all requests
 app.use(limiter);
 
-app.use(cors());
+app.options('*', cors());
+
+app.use(cors({
+  origin: "https://sohrab300.github.io", // Allow your GitHub Pages domain
+}));
+
 app.use(express.json());
 
 // Mount the authentication routes before other routes

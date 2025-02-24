@@ -13,11 +13,11 @@ const Signup = () => {
     e.preventDefault();
     try {
       const res = await fetch(
-        "https://video-call-webapp-r9a2.onrender.com/api/auth/login",
+        "https://video-call-webapp-r9a2.onrender.com/api/auth/signup",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ username, email, password }),
         }
       );
       const data = await res.json();
