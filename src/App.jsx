@@ -14,7 +14,7 @@ import Login from "./components/Login";
 import Signup from "./components/SignUp";
 
 // Initialize socket (update URL as needed)
-const socket = io("http://localhost:3000");
+const socket = io("https://video-call-webapp-r9a2.onrender.com");
 
 const MainApp = ({ socket, onlineCount, handleInterestSubmit, callData }) => {
   return (
