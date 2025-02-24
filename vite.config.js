@@ -8,4 +8,9 @@ export default defineConfig({
     tailwindcss(),
   ],
   base: "/Video-Call-WebApp/",
+  server: {
+    proxy: {
+      "/api": "http://localhost:3000", // Proxy API requests to the backend
+    },
+  },
 })

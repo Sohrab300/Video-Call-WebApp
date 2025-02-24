@@ -10,15 +10,18 @@ const getEmbedding = require('./utils/getEmbedding'); // New utility for embeddi
 const Interest = require('./models/Interest');
 const interestsRouter = require('./routes/interests');
 
+// Import the auth router (make sure you've created routes/auth.js)
+const authRouter = require('./routes/auth');
+
 // Import rate limit middleware
 const rateLimit = require('express-rate-limit');
 
 const app = express();
 
-// Set up rate limiting (e.g., 100 requests per 15 minutes per IP)
+// Set up rate limiting (e.g., 50 requests per 15 minutes per IP)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // limit each IP to 100 requests per window
+  max: 50,
   message: "Too many requests from this IP, please try again after 15 minutes.",
 });
 
@@ -27,6 +30,11 @@ app.use(limiter);
 
 app.use(cors());
 app.use(express.json());
+
+// Mount the authentication routes before other routes
+app.use('/api/auth', authRouter);
+
+// Mount other routes (e.g., interests)
 app.use('/api/interests', interestsRouter);
 
 const server = http.createServer(app);
@@ -36,11 +44,11 @@ sequelize.authenticate()
   .then(() => console.log('PostgreSQL connected'))
   .catch(err => console.error('PostgreSQL connection error:', err));
 
-// For development, we're forcing table recreation. In production, use migrations.
+// For development, we're forcing table recreation.
+// Make sure the User model is imported somewhere (e.g., in auth routes or here) so it's included.
 sequelize.sync({ force: true })
   .then(() => console.log('Sequelize models synchronized'))
   .catch(err => console.error('Error synchronizing Sequelize models:', err));
-
 
 // Helper function to normalize a vector
 const normalize = (vec) => {
@@ -52,7 +60,6 @@ const normalize = (vec) => {
 const cosineSimilarity = (vecA, vecB) => {
   const normA = normalize(vecA);
   const normB = normalize(vecB);
-  // Compute dot product of normalized vectors
   return normA.reduce((sum, a, i) => sum + a * normB[i], 0);
 };
 
@@ -69,7 +76,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Save the new interest record along with its embedding
     let newInterest;
     try {
       newInterest = await Interest.create({
@@ -84,7 +90,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Fetch all unmatched interests from other sockets
     let unmatchedInterests;
     try {
       unmatchedInterests = await Interest.findAll({
@@ -102,7 +107,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Compare the new embedding with each unmatched embedding using cosine similarity
     let bestMatch = null;
     let bestScore = 0;
     for (const interestRecord of unmatchedInterests) {
@@ -115,7 +119,6 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Define a threshold for similarity (e.g., 0.1 in your code)
     const threshold = 0.1;
     if (bestScore >= threshold && bestMatch) {
       const roomId = `${interest}-${Date.now()}`;
@@ -147,19 +150,15 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('iceCandidate', { candidate });
   });
 
-  // Listen for chat messages
   socket.on("chatMessage", (data) => {
     console.log("Chat message received:", data);
-    // Broadcast the message to other clients in the same room
     socket.to(data.roomId).emit("chatMessage", data);
   });
 
-  // Emit the updated user count to everyone
   io.emit("updateUserCount", io.engine.clientsCount);
 
   socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id);
-    // Emit the updated user count when a client disconnects
     io.emit("updateUserCount", io.engine.clientsCount);
     try {
       await Interest.destroy({ where: { socketId: socket.id, matched: false } });
