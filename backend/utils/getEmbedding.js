@@ -6,7 +6,7 @@ async function getEmbedding(text) {
   const timeout = setTimeout(() => controller.abort(), 20000); // 20-second timeout
 
   try {
-    const response = await fetch("https://fastapi-embedding.onrender.com/embed", {
+    const response = await fetch("https://fastembed-service-257606194123.us-central1.run.app/embed", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),

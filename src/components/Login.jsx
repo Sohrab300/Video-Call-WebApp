@@ -12,7 +12,7 @@ const Login = ({ setAuth }) => {
     e.preventDefault();
     try {
       const res = await fetch(
-        "https://video-call-webapp-r9a2.onrender.com/api/auth/login",
+        "https://my-backend-service-257606194123.us-central1.run.app/api/auth/login",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

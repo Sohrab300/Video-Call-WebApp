@@ -13,7 +13,7 @@ const Signup = () => {
     e.preventDefault();
     try {
       const res = await fetch(
-        "https://video-call-webapp-r9a2.onrender.com/api/auth/signup",
+        "https://my-backend-service-257606194123.us-central1.run.app/api/auth/signup",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

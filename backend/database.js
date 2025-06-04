@@ -2,7 +2,7 @@ const { Sequelize } = require('sequelize');
 
 // Use the DATABASE_URL environment variable if available, otherwise fall back to your Render connection string.
 const connectionString = process.env.DATABASE_URL || 
-  'postgresql://golmaal_interests_db_user:Xqsjb3ZHeMhTyIxIjLL3BtgtPFARvZeO@dpg-cuguall6l47c73bblck0-a/golmaal_interests_db';
+  'postgresql://golmaal_interests_db_3686_user:1vLo0UpvQqf8aZaOaty4x4YveT54D0tH@dpg-d0teskc9c44c739dlt00-a.oregon-postgres.render.com/golmaal_interests_db_3686';
 
 const sequelize = new Sequelize(connectionString, {
   dialect: 'postgres',
