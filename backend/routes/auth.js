@@ -7,15 +7,21 @@ const User = require("../models/User");
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret"; // use an env variable in production
 
-// Signup route
+// Signup route (no changes here unless you want to enforce unique usernames as well)
 router.post("/signup", async (req, res) => {
   const { username, email, password } = req.body;
   try {
-    // Check if user exists
+    // Check if email is already in use
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
       return res.status(400).json({ error: "Email already in use." });
     }
+    // (Optional) Check if username is already in use
+    const existingUsername = await User.findOne({ where: { username } });
+    if (existingUsername) {
+      return res.status(400).json({ error: "Username already in use." });
+    }
+
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     // Create new user
@@ -31,22 +37,40 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-// Login route
+// Login route (updated to accept identifier)
 router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { identifier, password } = req.body;
+
   try {
-    const user = await User.findOne({ where: { email } });
-    if (!user) {
-      return res.status(400).json({ error: "Invalid email or password." });
+    if (!identifier || !password) {
+      return res.status(400).json({ error: "Identifier and password are required." });
     }
+
+    // 1) Try to find by email
+    let user = await User.findOne({ where: { email: identifier } });
+
+    // 2) If not found by email, try username
+    if (!user) {
+      user = await User.findOne({ where: { username: identifier } });
+    }
+
+    if (!user) {
+      return res.status(400).json({ error: "Invalid username/email or password." });
+    }
+
+    // 3) Verify password
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) {
-      return res.status(400).json({ error: "Invalid email or password." });
+      return res.status(400).json({ error: "Invalid username/email or password." });
     }
-    // Create JWT token
-    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: "1h",
-    });
+
+    // 4) Create JWT token
+    const token = jwt.sign(
+      { userId: user.id, username: user.username, email: user.email },
+      JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
     res.status(200).json({ token, username: user.username });
   } catch (error) {
     console.error("Login error:", error);
