@@ -30,8 +30,21 @@ app.use(limiter);
 
 app.options('*', cors());
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://sohrab300.github.io"
+];
+
 app.use(cors({
-  origin: "https://sohrab300.github.io", // Allow your GitHub Pages domain
+  origin: (incomingOrigin, callback) => {
+    // Allow requests with no origin (like curl, Postman)
+    if (!incomingOrigin) return callback(null, true);
+    if (allowedOrigins.includes(incomingOrigin)) {
+      return callback(null, true);
+    }
+    // Other origins are rejected
+    return callback(new Error("Not allowed by CORS"), false);
+  }
 }));
 
 app.use(express.json());

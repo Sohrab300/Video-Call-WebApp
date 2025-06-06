@@ -8,6 +8,7 @@ import {
 import io from "socket.io-client";
 import Navbar from "./components/Navbar";
 import InterestForm from "./components/InterestForm";
+import ActiveInterests from "./components/ActiveInterests"; // import here
 import VideoCall from "./components/VideoCall";
 import CameraPreview from "./components/CameraPreview";
 import Login from "./components/Login";
@@ -20,15 +21,33 @@ const socket = io(
 
 const MainApp = ({ socket, onlineCount, handleInterestSubmit, callData }) => {
   return (
-    <div className="container bg-pink-100 min-h-screen min-w-full">
+    <div className="bg-pink-100 min-h-screen min-w-full">
+      {/* Navbar always spans full width */}
       <Navbar onlineCount={onlineCount} />
-      <div className="App">
-        <InterestForm onSubmit={handleInterestSubmit} />
-        {callData ? (
-          <VideoCall callData={callData} socket={socket} />
-        ) : (
-          <CameraPreview />
-        )}
+
+      {/* 
+        Below the navbar, we use a flex container:
+        - Left side: InterestForm + either VideoCall or CameraPreview
+        - Right side: ActiveInterests, pinned in the top-right area
+      */}
+      <div className="flex flex-col md:flex-row">
+        {/* Left Column (main content) */}
+        <div className="flex-1 p-4">
+          <InterestForm onSubmit={handleInterestSubmit} />
+
+          <div className="mt-6">
+            {callData ? (
+              <VideoCall callData={callData} socket={socket} />
+            ) : (
+              <CameraPreview />
+            )}
+          </div>
+        </div>
+
+        {/* Right Column (ActiveInterests) */}
+        <div className="w-full md:w-1/3 p-4">
+          <ActiveInterests />
+        </div>
       </div>
     </div>
   );
