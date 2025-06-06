@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 
-function InterestForm({ onSubmit }) {
+function InterestForm({ socket, onSubmit }) {
   const [interest, setInterest] = useState("");
   const [isDisabled, setIsDisabled] = useState(false);
   const [message, setMessage] = useState("");
@@ -8,7 +8,15 @@ function InterestForm({ onSubmit }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsDisabled(true);
-    setMessage(""); // Clear previous message
+    setMessage(""); // clear previous message
+
+    // Make sure socket is ready
+    const socketId = socket?.id;
+    if (!socketId) {
+      setMessage("⚠️ Unable to get your socket ID. Please refresh the page.");
+      setIsDisabled(false);
+      return;
+    }
 
     try {
       const res = await fetch(
@@ -18,26 +26,32 @@ function InterestForm({ onSubmit }) {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ interest }),
+          body: JSON.stringify({
+            socketId: socketId, // include socketId
+            interest: interest,
+          }),
         }
       );
 
       const data = await res.json();
 
-      if (res.ok && data.embedding) {
+      if (res.ok && data.success) {
         setMessage(
           "✅ Your interest has been recorded. Please wait while we match you."
         );
-        onSubmit && onSubmit(interest); // Only call if passed
+        // Emit via socket.io if you still want real-time matching
+        onSubmit && onSubmit(interest);
       } else {
-        setMessage("⚠️ Something went wrong. Please submit again.");
-        setIsDisabled(false); // Re-enable immediately if failed
+        setMessage(
+          "⚠️ " + (data.message || "Something went wrong. Please submit again.")
+        );
+        setIsDisabled(false); // re-enable immediately if failed
         return;
       }
     } catch (err) {
       console.error("Error submitting interest:", err);
       setMessage("⚠️ Could not reach the server. Please try again.");
-      setIsDisabled(false); // Re-enable on network failure
+      setIsDisabled(false); // re-enable on network failure
       return;
     }
 
@@ -46,7 +60,7 @@ function InterestForm({ onSubmit }) {
       setIsDisabled(false);
     }, 5000);
 
-    setInterest(""); // Clear input
+    setInterest(""); // clear input
   };
 
   return (

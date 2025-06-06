@@ -8,7 +8,7 @@ import {
 import io from "socket.io-client";
 import Navbar from "./components/Navbar";
 import InterestForm from "./components/InterestForm";
-import ActiveInterests from "./components/ActiveInterests"; // import here
+import ActiveInterests from "./components/ActiveInterests";
 import VideoCall from "./components/VideoCall";
 import CameraPreview from "./components/CameraPreview";
 import Login from "./components/Login";
@@ -33,7 +33,8 @@ const MainApp = ({ socket, onlineCount, handleInterestSubmit, callData }) => {
       <div className="flex flex-col md:flex-row">
         {/* Left Column (main content) */}
         <div className="flex-1 p-4">
-          <InterestForm onSubmit={handleInterestSubmit} />
+          {/* Pass socket={socket} into InterestForm */}
+          <InterestForm socket={socket} onSubmit={handleInterestSubmit} />
 
           <div className="mt-6">
             {callData ? (
