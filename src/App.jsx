@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useState, useEffect } from "react";
 import {
   BrowserRouter as Router,
@@ -6,6 +7,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import io from "socket.io-client";
+
 import Navbar from "./components/Navbar";
 import InterestForm from "./components/InterestForm";
 import ActiveInterests from "./components/ActiveInterests";
@@ -14,74 +16,54 @@ import CameraPreview from "./components/CameraPreview";
 import Login from "./components/Login";
 import Signup from "./components/SignUp";
 
-// Initialize socket (update URL as needed)
-const socket = io(
+// Initialize a single Socket.IO instance
+export const socket = io(
   "https://my-backend-service-257606194123.us-central1.run.app"
 );
 
-const MainApp = ({ socket, onlineCount, handleInterestSubmit, callData }) => {
-  return (
-    <div className="bg-pink-100 min-h-screen min-w-full">
-      {/* Navbar always spans full width */}
-      <Navbar onlineCount={onlineCount} />
-
-      {/* 
-        Below the navbar, we use a flex container:
-        - Left side: InterestForm + either VideoCall or CameraPreview
-        - Right side: ActiveInterests, pinned in the top-right area
-      */}
-      <div className="flex flex-col md:flex-row">
-        {/* Left Column (main content) */}
-        <div className="flex-1 p-4">
-          {/* Pass socket={socket} into InterestForm */}
-          <InterestForm socket={socket} onSubmit={handleInterestSubmit} />
-
-          <div className="mt-6">
-            {callData ? (
-              <VideoCall callData={callData} socket={socket} />
-            ) : (
-              <CameraPreview />
-            )}
-          </div>
-        </div>
-
-        {/* Right Column (ActiveInterests) */}
-        <div className="w-full md:w-1/3 p-4">
-          <ActiveInterests />
-        </div>
-      </div>
-    </div>
-  );
-};
-
 function App() {
-  // Manage authentication state (token and username)
+  // 1) Authentication state
   const [auth, setAuth] = useState(() => {
     const token = localStorage.getItem("token");
     const username = localStorage.getItem("username");
     return token ? { token, username } : null;
   });
 
+  // 2) Call/match state and online‐user count
   const [callData, setCallData] = useState(null);
   const [onlineCount, setOnlineCount] = useState(0);
 
-  // Listen for live user count updates and matchFound events
   useEffect(() => {
+    // 3) As soon as socket connects, save our socket.id
+    socket.on("connect", () => {
+      localStorage.setItem("socketId", socket.id);
+    });
+
+    // 4) Listen for global user‐count updates
     socket.on("updateUserCount", (count) => {
       setOnlineCount(count);
     });
+
+    // 5) Listen for matches
     socket.on("matchFound", (data) => {
-      console.log("Match found:", data);
       setCallData(data);
     });
+
     return () => {
+      socket.off("connect");
       socket.off("updateUserCount");
       socket.off("matchFound");
     };
   }, []);
 
+  // 6) When someone submits an interest, emit to server
   const handleInterestSubmit = (interest) => {
     socket.emit("submitInterest", { interest });
+  };
+
+  // 7) When manual‐match REST succeeds, start the call
+  const handleManualMatch = ({ roomId }) => {
+    setCallData({ roomId, isInitiator: true });
   };
 
   return (
@@ -93,12 +75,32 @@ function App() {
           path="/"
           element={
             auth ? (
-              <MainApp
-                socket={socket}
-                onlineCount={onlineCount}
-                handleInterestSubmit={handleInterestSubmit}
-                callData={callData}
-              />
+              <div className="bg-pink-100 min-h-screen min-w-full">
+                <Navbar onlineCount={onlineCount} />
+                <div className="flex flex-col">
+                  {/* Left side: InterestForm + VideoCall or CameraPreview */}
+                  <div className="flex-1 p-4">
+                    <InterestForm
+                      socket={socket}
+                      onSubmit={handleInterestSubmit}
+                    />
+                    <div className="mt-6">
+                      {callData ? (
+                        <VideoCall callData={callData} socket={socket} />
+                      ) : (
+                        <CameraPreview />
+                      )}
+                    </div>
+                  </div>
+                  {/* Right side: ActiveInterests */}
+                  <div className="w-full p-4">
+                    <ActiveInterests
+                      socket={socket}
+                      onMatch={handleManualMatch}
+                    />
+                  </div>
+                </div>
+              </div>
             ) : (
               <Navigate to="/login" />
             )

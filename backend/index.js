@@ -5,95 +5,119 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 const sequelize = require('./database');
 const { Op } = require('sequelize');
-const getEmbedding = require('./utils/getEmbedding'); // New utility for embeddings
+const getEmbedding = require('./utils/getEmbedding');
 
 const Interest = require('./models/Interest');
 const interestsRouter = require('./routes/interests');
-
-// Import the auth router (make sure you've created routes/auth.js)
 const authRouter = require('./routes/auth');
-
-// Import rate limit middleware
 const rateLimit = require('express-rate-limit');
 
 const app = express();
 
-// Set up rate limiting (e.g., 50 requests per 15 minutes per IP)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50,
-  message: "Too many requests from this IP, please try again after 15 minutes.",
+app.use((req, _res, next) => {
+  console.log(`⬇️  ${req.method} ${req.originalUrl}`);
+  next();
 });
 
-// Apply the rate limiter to all requests
-app.use(limiter);
-
+// CORS (allow localhost:5173 and GitHub Pages)
 app.options('*', cors());
-
 const allowedOrigins = [
   "http://localhost:5173",
   "https://sohrab300.github.io"
 ];
-
 app.use(cors({
   origin: (incomingOrigin, callback) => {
-    // Allow requests with no origin (like curl, Postman)
     if (!incomingOrigin) return callback(null, true);
-    if (allowedOrigins.includes(incomingOrigin)) {
-      return callback(null, true);
-    }
-    // Other origins are rejected
+    if (allowedOrigins.includes(incomingOrigin)) return callback(null, true);
     return callback(new Error("Not allowed by CORS"), false);
   }
 }));
 
+// Rate limiter
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 120,
+  message: "Too many requests from this IP, please try again after 15 minutes.",
+});
+app.use(limiter);
+
 app.use(express.json());
-
-// Mount the authentication routes before other routes
 app.use('/api/auth', authRouter);
-
-// Mount other routes (e.g., interests)
 app.use('/api/interests', interestsRouter);
 
 const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: '*' } });
 
+// Make Socket.IO available in `req.app.get('io')`
+app.set('io', io);
+
 sequelize.authenticate()
   .then(() => console.log('PostgreSQL connected'))
   .catch(err => console.error('PostgreSQL connection error:', err));
 
-// For development, we're forcing table recreation.
-// Make sure the User model is imported somewhere (e.g., in auth routes or here) so it's included.
+// For development: force sync (drops & recreates tables)
 sequelize.sync({ force: true })
   .then(() => console.log('Sequelize models synchronized'))
   .catch(err => console.error('Error synchronizing Sequelize models:', err));
 
-// Helper function to normalize a vector
+// Utility: normalize & cosine similarity
 const normalize = (vec) => {
   const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
   return vec.map(val => val / magnitude);
 };
-
-// Updated cosine similarity function using normalized vectors
 const cosineSimilarity = (vecA, vecB) => {
   const normA = normalize(vecA);
   const normB = normalize(vecB);
   return normA.reduce((sum, a, i) => sum + a * normB[i], 0);
 };
 
+// Helper to broadcast current unmatched list
+async function broadcastActiveList() {
+  try {
+    const activeList = await Interest.findAll({
+      where: { matched: false },
+      attributes: ['id', 'socketId', 'interest', 'createdAt'],
+      order: [['createdAt', 'ASC']],
+    });
+    io.emit("activeListUpdated", activeList);
+  } catch (err) {
+    console.error("Error broadcasting active list:", err);
+  }
+}
+
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
+  // Send current active list immediately
+  (async () => {
+    const activeList = await Interest.findAll({
+      where: { matched: false },
+      attributes: ['id', 'socketId', 'interest', 'createdAt'],
+      order: [['createdAt', 'ASC']],
+    });
+    socket.emit("activeListUpdated", activeList);
+  })();
+
+  // ─── Handle "submitInterest" ─────────────────────────────────────
   socket.on('submitInterest', async ({ interest }) => {
     console.log(`User ${socket.id} submitted interest: ${interest}`);
 
-    // Get vector embedding for the submitted interest
-    const embedding = await getEmbedding(interest);
-    if (!embedding) {
-      console.error('Failed to get embedding for interest.');
+    // 1) Generate embedding
+    let embedding;
+    try {
+      embedding = await getEmbedding(interest);
+    } catch (err) {
+      console.error('Embedding service error:', err);
+      socket.emit('interestError', { message: 'Embedding service error. Please try again.' });
+      return;
+    }
+    if (!embedding || !Array.isArray(embedding)) {
+      console.error('Failed to generate embedding');
+      socket.emit('interestError', { message: 'Failed to generate embedding. Please submit again.' });
       return;
     }
 
+    // 2) Create new interest record
     let newInterest;
     try {
       newInterest = await Interest.create({
@@ -102,43 +126,45 @@ io.on('connection', (socket) => {
         embedding,
         matched: false,
       });
-      console.log('Interest saved to PostgreSQL:', newInterest.toJSON());
+      console.log('Interest saved:', newInterest.toJSON());
     } catch (error) {
-      console.error('Error saving interest:', error);
+      console.error('Database error saving interest:', error);
+      socket.emit('interestError', { message: 'Database error. Please try again.' });
       return;
     }
 
-    let unmatchedInterests;
+    // 3) Acknowledge client of success
+    socket.emit('interestAccepted', { interest: newInterest });
+
+    // 4) Broadcast updated active list to all clients
+    broadcastActiveList();
+
+    // 5) Attempt to auto-match
+    let unmatched;
     try {
-      unmatchedInterests = await Interest.findAll({
-        where: {
-          matched: false,
-          socketId: { [Op.ne]: socket.id },
-        },
+      unmatched = await Interest.findAll({
+        where: { matched: false, socketId: { [Op.ne]: socket.id } },
       });
     } catch (err) {
       console.error('Error fetching unmatched interests:', err);
       return;
     }
 
-    if (!unmatchedInterests || unmatchedInterests.length === 0) {
-      return;
-    }
+    if (!unmatched.length) return;
 
     let bestMatch = null;
     let bestScore = 0;
-    for (const interestRecord of unmatchedInterests) {
-      if (!interestRecord.embedding) continue;
-      const score = cosineSimilarity(embedding, interestRecord.embedding);
-      console.log(`Similarity score between "${interest}" and "${interestRecord.interest}": ${score}`);
+    unmatched.forEach(rec => {
+      if (!rec.embedding) return;
+      const score = cosineSimilarity(embedding, rec.embedding);
       if (score > bestScore) {
         bestScore = score;
-        bestMatch = interestRecord;
+        bestMatch = rec;
       }
-    }
+    });
 
-    const threshold = 0.1;
-    if (bestScore >= threshold && bestMatch) {
+    const threshold = 0.4;
+    if (bestMatch && bestScore >= threshold) {
       const roomId = `${interest}-${Date.now()}`;
       try {
         await Interest.update({ matched: true, roomId }, { where: { id: newInterest.id } });
@@ -147,41 +173,40 @@ io.on('connection', (socket) => {
         console.error('Error updating matched interests:', err);
         return;
       }
-      console.log(`Match found between "${interest}" and "${bestMatch.interest}" (score: ${bestScore}) in room ${roomId}`);
+
+      console.log(`Match found in room ${roomId}: ${interest} & ${bestMatch.interest}`);
+
+      // Join both clients to room
       socket.join(roomId);
       io.to(bestMatch.socketId).socketsJoin(roomId);
-      io.to(socket.id).emit('matchFound', { roomId, isInitiator: true });
+
+      // Notify clients
+      socket.emit('matchFound', { roomId, isInitiator: true });
       io.to(bestMatch.socketId).emit('matchFound', { roomId, isInitiator: false });
+
+      // Broadcast list again after matching
+      broadcastActiveList();
     }
   });
 
-  // Relay signaling messages
-  socket.on('offer', ({ offer, roomId }) => {
-    socket.to(roomId).emit('offer', { offer });
-  });
+  // ─── WebRTC signaling ─────────────────────────────────────────────
+  socket.on('offer', ({ offer, roomId }) => socket.to(roomId).emit('offer', { offer }));
+  socket.on('answer', ({ answer, roomId }) => socket.to(roomId).emit('answer', { answer }));
+  socket.on('iceCandidate', ({ candidate, roomId }) => socket.to(roomId).emit('iceCandidate', { candidate }));
+  socket.on('chatMessage', data => socket.to(data.roomId).emit('chatMessage', data));
 
-  socket.on('answer', ({ answer, roomId }) => {
-    socket.to(roomId).emit('answer', { answer });
-  });
+  // ─── User count update ─────────────────────────────────────────────
+  io.emit('updateUserCount', io.engine.clientsCount);
 
-  socket.on('iceCandidate', ({ candidate, roomId }) => {
-    socket.to(roomId).emit('iceCandidate', { candidate });
-  });
-
-  socket.on("chatMessage", (data) => {
-    console.log("Chat message received:", data);
-    socket.to(data.roomId).emit("chatMessage", data);
-  });
-
-  io.emit("updateUserCount", io.engine.clientsCount);
-
+  // ─── Handle disconnect ─────────────────────────────────────────────
   socket.on('disconnect', async () => {
     console.log('Client disconnected:', socket.id);
-    io.emit("updateUserCount", io.engine.clientsCount);
+    io.emit('updateUserCount', io.engine.clientsCount);
     try {
       await Interest.destroy({ where: { socketId: socket.id, matched: false } });
+      broadcastActiveList();
     } catch (err) {
-      console.error("Error cleaning up interests on disconnect:", err);
+      console.error('Error cleaning up interests on disconnect:', err);
     }
   });
 });

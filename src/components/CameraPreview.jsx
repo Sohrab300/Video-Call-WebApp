@@ -22,7 +22,7 @@ function CameraPreview() {
   return (
     <div className="container p-5 text-center items-center justify-center flex flex-col min-w-screen md:mt-22">
       <video
-        className="w-xs md:w-xl"
+        className="w-xs md:w-md"
         ref={videoRef}
         autoPlay
         muted

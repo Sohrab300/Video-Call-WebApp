@@ -1,66 +1,51 @@
-import React, { useState } from "react";
+// src/components/InterestForm.jsx
+import React, { useState, useEffect } from "react";
 
-function InterestForm({ socket, onSubmit }) {
+export default function InterestForm({ socket }) {
   const [interest, setInterest] = useState("");
   const [isDisabled, setIsDisabled] = useState(false);
   const [message, setMessage] = useState("");
 
-  const handleSubmit = async (e) => {
+  useEffect(() => {
+    // Listen for server acknowledgement
+    socket.on("interestAccepted", (_data) => {
+      setMessage(
+        "✅ Your interest has been recorded. Please wait while we match you."
+      );
+      // Re‐enable submit button in a few seconds:
+      setTimeout(() => setIsDisabled(false), 5000);
+    });
+
+    socket.on("interestError", (payload) => {
+      setMessage(
+        "⚠️ " +
+          (payload.message ||
+            "Failed to generate embedding. Please submit again.")
+      );
+      setIsDisabled(false);
+    });
+
+    return () => {
+      socket.off("interestAccepted");
+      socket.off("interestError");
+    };
+  }, [socket]);
+
+  const handleSubmit = (e) => {
     e.preventDefault();
     setIsDisabled(true);
-    setMessage(""); // clear previous message
+    setMessage("");
 
-    // Make sure socket is ready
-    const socketId = socket?.id;
+    // Get our socket ID
+    const socketId = socket.id || localStorage.getItem("socketId");
     if (!socketId) {
-      setMessage("⚠️ Unable to get your socket ID. Please refresh the page.");
+      setMessage("⚠️ Unable to get your socket ID. Please refresh.");
       setIsDisabled(false);
       return;
     }
 
-    try {
-      const res = await fetch(
-        "https://my-backend-service-257606194123.us-central1.run.app/api/interests",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            socketId: socketId, // include socketId
-            interest: interest,
-          }),
-        }
-      );
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setMessage(
-          "✅ Your interest has been recorded. Please wait while we match you."
-        );
-        // Emit via socket.io if you still want real-time matching
-        onSubmit && onSubmit(interest);
-      } else {
-        setMessage(
-          "⚠️ " + (data.message || "Something went wrong. Please submit again.")
-        );
-        setIsDisabled(false); // re-enable immediately if failed
-        return;
-      }
-    } catch (err) {
-      console.error("Error submitting interest:", err);
-      setMessage("⚠️ Could not reach the server. Please try again.");
-      setIsDisabled(false); // re-enable on network failure
-      return;
-    }
-
-    // Re-enable after 5 seconds if successful
-    setTimeout(() => {
-      setIsDisabled(false);
-    }, 5000);
-
-    setInterest(""); // clear input
+    // Emit only ONCE. The server will respond with either "interestAccepted" or "interestError".
+    socket.emit("submitInterest", { interest });
   };
 
   return (
@@ -96,5 +81,3 @@ function InterestForm({ socket, onSubmit }) {
     </div>
   );
 }
-
-export default InterestForm;
