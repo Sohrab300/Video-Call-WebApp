@@ -20,7 +20,6 @@ router.post("/", async (req, res) => {
   try {
     const { socketId, interest } = req.body;
 
-    // Validate inputs
     if (!socketId || !interest) {
       return res.status(400).json({
         success: false,
@@ -28,9 +27,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Generate embedding by calling your real utility
     const embedding = await getEmbedding(interest);
-
     if (!embedding || !Array.isArray(embedding)) {
       return res.status(500).json({
         success: false,
@@ -38,7 +35,6 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // Save to database
     const newInterest = await Interest.create({
       socketId,
       interest,
@@ -71,10 +67,7 @@ router.get("/active", async (req, res) => {
       attributes: ["id", "socketId", "interest", "createdAt"],
       order: [["createdAt", "ASC"]],
     });
-    return res.status(200).json({
-      success: true,
-      data: activeList,
-    });
+    return res.status(200).json({ success: true, data: activeList });
   } catch (error) {
     console.error("Error fetching active interests:", error);
     return res.status(500).json({
@@ -94,8 +87,8 @@ router.post("/:id/match", async (req, res) => {
   });
 
   try {
-    const otherId = req.params.id; // ID of target interest
-    const { socketId: callerSocketId } = req.body; // Caller’s socketId
+    const otherId = req.params.id;
+    const { socketId: callerSocketId } = req.body;
 
     if (!callerSocketId) {
       return res.status(400).json({
@@ -104,12 +97,8 @@ router.post("/:id/match", async (req, res) => {
       });
     }
 
-    // 1) Find caller’s own unmatched interest
     const callerInterest = await Interest.findOne({
-      where: {
-        socketId: callerSocketId,
-        matched: false,
-      },
+      where: { socketId: callerSocketId, matched: false },
     });
     if (!callerInterest) {
       return res.status(404).json({
@@ -118,12 +107,8 @@ router.post("/:id/match", async (req, res) => {
       });
     }
 
-    // 2) Find the “other” interest by ID
     const otherInterest = await Interest.findOne({
-      where: {
-        id: otherId,
-        matched: false,
-      },
+      where: { id: otherId, matched: false },
     });
     if (!otherInterest) {
       return res.status(404).json({
@@ -132,10 +117,7 @@ router.post("/:id/match", async (req, res) => {
       });
     }
 
-    // 3) Generate a new roomId
     const roomId = makeRoomId();
-
-    // 4) Update both records in a transaction
     await Interest.sequelize.transaction(async (t) => {
       await callerInterest.update(
         { matched: true, roomId },
@@ -144,26 +126,28 @@ router.post("/:id/match", async (req, res) => {
       await otherInterest.update({ matched: true, roomId }, { transaction: t });
     });
 
-    // ─── JOIN BOTH SOCKETS INTO THAT ROOM ───────────────────────────
     const io = req.app.get("io");
-    // 1) Join the caller’s socket to roomId
+    // Join both sockets into the room
     const callerSocket = io.sockets.sockets.get(callerSocketId);
-    if (callerSocket) {
-      callerSocket.join(roomId);
-    }
-    // 2) Join the “other” peer’s socket to roomId
+    if (callerSocket) callerSocket.join(roomId);
     const otherSocket = io.sockets.sockets.get(otherInterest.socketId);
-    if (otherSocket) {
-      otherSocket.join(roomId);
-    }
+    if (otherSocket) otherSocket.join(roomId);
 
-    // 5) Notify the other peer via Socket.IO
+    // Notify both peers
+    io.to(callerSocketId).emit("matchFound", { roomId, isInitiator: true });
     io.to(otherInterest.socketId).emit("matchFound", {
       roomId,
       isInitiator: false,
     });
 
-    // 6) Respond with roomId and peer info
+    // Re-broadcast updated active list
+    const activeList = await Interest.findAll({
+      where: { matched: false },
+      attributes: ["id", "socketId", "interest", "createdAt"],
+      order: [["createdAt", "ASC"]],
+    });
+    io.emit("activeListUpdated", activeList);
+
     return res.status(200).json({
       success: true,
       message: "Matched successfully",
@@ -186,24 +170,18 @@ router.post("/:id/match", async (req, res) => {
 });
 
 // ================================================
-// 5) GET /api/interests - (Existing) Auto‐match by interest string
+// 5) GET /api/interests - (Existing) Auto-match by interest string
 // ================================================
 router.get("/", async (req, res) => {
   try {
     const { interest, socketId } = req.query;
     const found = await Interest.findOne({
-      where: {
-        interest,
-        matched: false,
-        socketId: { [Op.ne]: socketId },
-      },
+      where: { interest, matched: false, socketId: { [Op.ne]: socketId } },
     });
     return res.status(200).json(found);
   } catch (error) {
     console.error("Error retrieving interest:", error);
-    return res.status(500).json({
-      error: "Server error retrieving interest",
-    });
+    return res.status(500).json({ error: "Server error retrieving interest" });
   }
 });
 
@@ -221,9 +199,7 @@ router.put("/:id", async (req, res) => {
     return res.status(200).json(updatedInterest);
   } catch (error) {
     console.error("Error updating interest:", error);
-    return res.status(500).json({
-      error: "Server error updating interest",
-    });
+    return res.status(500).json({ error: "Server error updating interest" });
   }
 });
 

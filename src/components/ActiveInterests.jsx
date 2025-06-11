@@ -1,81 +1,47 @@
-// src/components/ActiveInterests.jsx
+/* src/components/ActiveInterests.jsx */
 import React, { useEffect, useState } from "react";
 
-export default function ActiveInterests({ socket, onMatch }) {
+export default function ActiveInterests({ socket, onMatch, myInterestId }) {
   const [activeList, setActiveList] = useState([]);
   const [error, setError] = useState("");
   const [matchingId, setMatchingId] = useState(null);
 
-  // 1) Store the live socket.id in state (no more localStorage race‐condition)
   const [mySocketId, setMySocketId] = useState("");
 
   useEffect(() => {
-    // As soon as socket connects, grab the real socket.id
     function handleConnect() {
       setMySocketId(socket.id);
     }
     socket.on("connect", handleConnect);
-
     return () => {
       socket.off("connect", handleConnect);
     };
   }, [socket]);
 
-  // 2) Only after we know our own socketId, start listening for the active‐list
   useEffect(() => {
-    if (!mySocketId) return; // don’t subscribe until we have a real socket.id
-
+    if (!mySocketId) return;
     function handleActiveUpdate(newList) {
-      // Filter out our own entry using the up‐to‐date mySocketId
-      const filtered = newList.filter((item) => item.socketId !== mySocketId);
+      // Exclude both self and the peer we've requested (pending)
+      const filtered = newList.filter(
+        (item) =>
+          item.socketId !== mySocketId && item.id !== Number(myInterestId)
+      );
       setActiveList(filtered);
     }
-
     socket.on("activeListUpdated", handleActiveUpdate);
-
     return () => {
       socket.off("activeListUpdated", handleActiveUpdate);
     };
-  }, [socket, mySocketId]);
+  }, [socket, mySocketId, myInterestId]);
 
-  const handleConnect = async (targetId) => {
-    if (!mySocketId) {
-      setError("Your socket ID is missing. Please refresh.");
-      return;
-    }
-    setMatchingId(targetId);
+  const handleConnect = (item) => {
+    setMatchingId(item.id);
     setError("");
-
-    try {
-      const res = await fetch(
-        // Make sure this URL matches your actual backend (not “localhost:3000” once deployed)
-        `https://my-backend-service-257606194123.us-central1.run.app/api/interests/${targetId}/match`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ socketId: mySocketId }),
-        }
-      );
-      const json = await res.json();
-
-      if (res.status === 429) {
-        setError("Too many requests. Please wait a moment.");
-        setMatchingId(null);
-        return;
-      }
-      if (!res.ok || !json.success) {
-        setError(json.error || "Match attempt failed.");
-        setMatchingId(null);
-        return;
-      }
-
-      // Tell App we matched, so it can render VideoCall
-      onMatch({ roomId: json.data.roomId });
-    } catch (err) {
-      console.error("Error in handleConnect:", err);
-      setError("Unable to connect right now.");
-      setMatchingId(null);
-    }
+    socket.emit("connectionRequest", {
+      targetSocketId: item.socketId,
+      requestId: myInterestId,
+      interest: item.interest,
+    });
   };
 
   return (
@@ -101,7 +67,7 @@ export default function ActiveInterests({ socket, onMatch }) {
               </p>
             </div>
             <button
-              onClick={() => handleConnect(item.id)}
+              onClick={() => handleConnect(item)}
               disabled={matchingId === item.id}
               className={`ml-4 px-3 py-1 rounded text-white ${
                 matchingId === item.id
@@ -118,7 +84,14 @@ export default function ActiveInterests({ socket, onMatch }) {
   );
 }
 
-// You can keep your existing timeSince(...) helper here
 function timeSince(dateString) {
-  /* … */
+  const now = new Date();
+  const created = new Date(dateString);
+  const diffMs = now - created;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  return `${diffHr}h ago`;
 }

@@ -1,4 +1,4 @@
-// src/App.jsx
+/* src/App.jsx */
 import React, { useState, useEffect } from "react";
 import {
   BrowserRouter as Router,
@@ -17,9 +17,7 @@ import Login from "./components/Login";
 import Signup from "./components/SignUp";
 
 // Initialize a single Socket.IO instance
-export const socket = io(
-  "https://my-backend-service-257606194123.us-central1.run.app"
-);
+export const socket = io("http://localhost:3000");
 
 function App() {
   // 1) Authentication state
@@ -33,41 +31,95 @@ function App() {
   const [callData, setCallData] = useState(null);
   const [onlineCount, setOnlineCount] = useState(0);
 
+  // 3) Track our own submitted interest record ID
+  const [myInterestId, setMyInterestId] = useState(null);
+
+  // 4) Incoming connection request state
+  const [incomingReq, setIncomingReq] = useState(null);
+
   useEffect(() => {
-    // 3) As soon as socket connects, save our socket.id
+    // socket: connect, count, matchFound
     socket.on("connect", () => {
       localStorage.setItem("socketId", socket.id);
     });
-
-    // 4) Listen for global user‐count updates
-    socket.on("updateUserCount", (count) => {
-      setOnlineCount(count);
-    });
-
-    // 5) Listen for matches
+    socket.on("updateUserCount", setOnlineCount);
     socket.on("matchFound", (data) => {
       setCallData(data);
+    });
+
+    // 5) Handle incoming request
+    socket.on("incomingRequest", (req) => {
+      setIncomingReq(req);
+    });
+    // 6) Handle denial
+    socket.on("requestDenied", ({ fromSocketId }) => {
+      alert(`User ${fromSocketId.slice(-6)} denied your request.`);
     });
 
     return () => {
       socket.off("connect");
       socket.off("updateUserCount");
       socket.off("matchFound");
+      socket.off("incomingRequest");
+      socket.off("requestDenied");
     };
   }, []);
 
-  // 6) When someone submits an interest, emit to server
+  // 7) When someone submits an interest, emit to server
   const handleInterestSubmit = (interest) => {
     socket.emit("submitInterest", { interest });
   };
 
-  // 7) When manual‐match REST succeeds, start the call
+  // 8) When manual‐match REST or auto match succeeds, start the call
   const handleManualMatch = ({ roomId }) => {
     setCallData({ roomId, isInitiator: true });
   };
 
   return (
     <Router basename="/Video-Call-WebApp">
+      {/* Yes/No Modal */}
+      {incomingReq && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg shadow-lg fixed top-0 right-0">
+            <p className="mb-4">
+              User {incomingReq.fromSocketId.slice(-6)} wants to connect
+              (interest: <strong>{incomingReq.interest}</strong>).
+            </p>
+            <div className="flex justify-end space-x-4">
+              <button
+                className="px-4 py-2 bg-green-500 text-white rounded"
+                onClick={async () => {
+                  // YES: call manual match
+                  await fetch(
+                    `http://localhost:3000/api/interests/${incomingReq.requestId}/match`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ socketId: socket.id }),
+                    }
+                  );
+                  setIncomingReq(null);
+                }}
+              >
+                Yes
+              </button>
+              <button
+                className="px-4 py-2 bg-red-500 text-white rounded"
+                onClick={() => {
+                  socket.emit("connectionResponse", {
+                    targetSocketId: incomingReq.fromSocketId,
+                    accepted: false,
+                  });
+                  setIncomingReq(null);
+                }}
+              >
+                No
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Routes>
         <Route path="/login" element={<Login setAuth={setAuth} />} />
         <Route path="/signup" element={<Signup />} />
@@ -83,6 +135,9 @@ function App() {
                     <InterestForm
                       socket={socket}
                       onSubmit={handleInterestSubmit}
+                      onInterestAccepted={(newRecord) =>
+                        setMyInterestId(newRecord.id)
+                      }
                     />
                     <div className="mt-6">
                       {callData ? (
@@ -97,6 +152,7 @@ function App() {
                     <ActiveInterests
                       socket={socket}
                       onMatch={handleManualMatch}
+                      myInterestId={myInterestId}
                     />
                   </div>
                 </div>
