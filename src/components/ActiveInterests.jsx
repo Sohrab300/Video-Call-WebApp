@@ -21,7 +21,6 @@ export default function ActiveInterests({ socket, onMatch, myInterestId }) {
   useEffect(() => {
     if (!mySocketId) return;
     function handleActiveUpdate(newList) {
-      // Exclude both self and the peer we've requested (pending)
       const filtered = newList.filter(
         (item) =>
           item.socketId !== mySocketId && item.id !== Number(myInterestId)
@@ -37,11 +36,35 @@ export default function ActiveInterests({ socket, onMatch, myInterestId }) {
   const handleConnect = (item) => {
     setMatchingId(item.id);
     setError("");
-    socket.emit("connectionRequest", {
-      targetSocketId: item.socketId,
-      requestId: myInterestId,
-      interest: item.interest,
-    });
+    fetch(
+      `https://my-backend-service-257606194123.us-central1.run.app/api/interests/${item.id}/match`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ socketId: mySocketId }),
+      }
+    )
+      .then((res) =>
+        res.json().then((json) => ({ status: res.status, body: json }))
+      )
+      .then(({ status, body }) => {
+        if (status === 429) {
+          setError("Too many requests. Please wait a moment.");
+          setMatchingId(null);
+          return;
+        }
+        if (!body.success) {
+          setError(body.error || "Match attempt failed.");
+          setMatchingId(null);
+          return;
+        }
+        onMatch({ roomId: body.data.roomId });
+      })
+      .catch((err) => {
+        console.error("Error in handleConnect:", err);
+        setError("Unable to connect right now.");
+        setMatchingId(null);
+      });
   };
 
   return (
