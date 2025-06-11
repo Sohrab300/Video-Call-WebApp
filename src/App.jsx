@@ -93,7 +93,7 @@ function App() {
                 onClick={async () => {
                   // YES: call manual match
                   await fetch(
-                    `http://localhost:3000/api/interests/${incomingReq.requestId}/match`,
+                    `https://my-backend-service-257606194123.us-central1.run.app/api/interests/${incomingReq.requestId}/match`,
                     {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
