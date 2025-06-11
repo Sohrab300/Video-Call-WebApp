@@ -17,7 +17,9 @@ import Login from "./components/Login";
 import Signup from "./components/SignUp";
 
 // Initialize a single Socket.IO instance
-export const socket = io("http://localhost:3000");
+export const socket = io(
+  "https://my-backend-service-257606194123.us-central1.run.app"
+);
 
 function App() {
   // 1) Authentication state
