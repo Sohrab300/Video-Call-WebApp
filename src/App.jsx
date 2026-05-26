@@ -4,7 +4,6 @@ import {
   BrowserRouter as Router,
   Routes,
   Route,
-  Navigate,
 } from "react-router-dom";
 import io from "socket.io-client";
 
@@ -13,8 +12,6 @@ import InterestForm from "./components/InterestForm";
 import ActiveInterests from "./components/ActiveInterests";
 import VideoCall from "./components/VideoCall";
 import CameraPreview from "./components/CameraPreview";
-import Login from "./components/Login";
-import Signup from "./components/SignUp";
 
 // Initialize a single Socket.IO instance
 export const socket = io(
@@ -22,12 +19,7 @@ export const socket = io(
 );
 
 function App() {
-  // 1) Authentication state
-  const [auth, setAuth] = useState(() => {
-    const token = localStorage.getItem("token");
-    const username = localStorage.getItem("username");
-    return token ? { token, username } : null;
-  });
+  // 1) Removed authentication state
 
   // 2) Call/match state and online‐user count
   const [callData, setCallData] = useState(null);
@@ -123,45 +115,39 @@ function App() {
       )}
 
       <Routes>
-        <Route path="/login" element={<Login setAuth={setAuth} />} />
-        <Route path="/signup" element={<Signup />} />
         <Route
           path="/"
           element={
-            auth ? (
-              <div className="bg-pink-100 min-h-screen min-w-full">
-                <Navbar onlineCount={onlineCount} />
-                <div className="flex flex-col">
-                  {/* Left side: InterestForm + VideoCall or CameraPreview */}
-                  <div className="flex-1 p-4">
-                    <InterestForm
-                      socket={socket}
-                      onSubmit={handleInterestSubmit}
-                      onInterestAccepted={(newRecord) =>
-                        setMyInterestId(newRecord.id)
-                      }
-                    />
-                    <div className="mt-6">
-                      {callData ? (
-                        <VideoCall callData={callData} socket={socket} />
-                      ) : (
-                        <CameraPreview />
-                      )}
-                    </div>
-                  </div>
-                  {/* Right side: ActiveInterests */}
-                  <div className="w-full p-4">
-                    <ActiveInterests
-                      socket={socket}
-                      onMatch={handleManualMatch}
-                      myInterestId={myInterestId}
-                    />
+            <div className="bg-pink-100 min-h-screen min-w-full">
+              <Navbar onlineCount={onlineCount} />
+              <div className="flex flex-col">
+                {/* Left side: InterestForm + VideoCall or CameraPreview */}
+                <div className="flex-1 p-4">
+                  <InterestForm
+                    socket={socket}
+                    onSubmit={handleInterestSubmit}
+                    onInterestAccepted={(newRecord) =>
+                      setMyInterestId(newRecord.id)
+                    }
+                  />
+                  <div className="mt-6">
+                    {callData ? (
+                      <VideoCall callData={callData} socket={socket} />
+                    ) : (
+                      <CameraPreview />
+                    )}
                   </div>
                 </div>
+                {/* Right side: ActiveInterests */}
+                <div className="w-full p-4">
+                  <ActiveInterests
+                    socket={socket}
+                    onMatch={handleManualMatch}
+                    myInterestId={myInterestId}
+                  />
+                </div>
               </div>
-            ) : (
-              <Navigate to="/login" />
-            )
+            </div>
           }
         />
       </Routes>

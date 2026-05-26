@@ -3,7 +3,7 @@ import Logo from "/logo-2.svg";
 
 const Navbar = ({ onlineCount }) => {
   return (
-    <div className="container flex justify-between items-center px-12 min-w-full bg-pink-200 h-[10vh]">
+    <div className="container flex justify-between items-center px-12 min-w-full bg-pink-200 h-[10vh] border-b-2 border-pink-500">
       <div className="logo w-40 h-12 flex justify-center items-center text-3xl font-bold">
         <img src={Logo} alt="Logo" />
       </div>

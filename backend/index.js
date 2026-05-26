@@ -9,7 +9,6 @@ const getEmbedding = require("./utils/getEmbedding");
 
 const Interest = require("./models/Interest");
 const interestsRouter = require("./routes/interests");
-const authRouter = require("./routes/auth");
 const rateLimit = require("express-rate-limit");
 
 const app = express();
@@ -41,7 +40,6 @@ const limiter = rateLimit({
 app.use(limiter);
 
 app.use(express.json());
-app.use("/api/auth", authRouter);
 app.use("/api/interests", interestsRouter);
 
 const server = http.createServer(app);
