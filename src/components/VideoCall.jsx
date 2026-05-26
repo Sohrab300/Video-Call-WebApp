@@ -2,6 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ChatBox from "./ChatBox"; // import ChatBox
 import { ICE_SERVERS } from "../config";
 
+function isIOSDevice() {
+  if (typeof navigator === "undefined") return false;
+
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
 function VideoCall({ callData, socket }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -9,8 +18,12 @@ function VideoCall({ callData, socket }) {
   const localStream = useRef(null);
   const remoteStream = useRef(null);
   const pendingIceCandidates = useRef([]);
+  const startCallRef = useRef(null);
+  const localMediaStarted = useRef(false);
+  const [requiresManualStart] = useState(() => isIOSDevice());
   const [connectionState, setConnectionState] = useState("connecting");
   const [remoteMediaState, setRemoteMediaState] = useState("waiting");
+  const [callStartNeeded, setCallStartNeeded] = useState(requiresManualStart);
 
   const resumeRemoteVideo = () => {
     remoteVideoRef.current
@@ -20,6 +33,10 @@ function VideoCall({ callData, socket }) {
         console.error("Error resuming remote video:", error);
         setRemoteMediaState("blocked");
       });
+  };
+
+  const startCallFromUserGesture = () => {
+    startCallRef.current?.();
   };
 
   const restartConnection = useCallback(async () => {
@@ -153,6 +170,10 @@ function VideoCall({ callData, socket }) {
     socket.on("iceCandidate", handleIceCandidate);
 
     const startCall = async () => {
+      if (localMediaStarted.current) return;
+      localMediaStarted.current = true;
+      setCallStartNeeded(false);
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
@@ -198,11 +219,14 @@ function VideoCall({ callData, socket }) {
       }
     };
 
-    startCall();
+    startCallRef.current = startCall;
+    if (!requiresManualStart) startCall();
 
     // Cleanup on component unmount
     return () => {
       isMounted = false;
+      startCallRef.current = null;
+      localMediaStarted.current = false;
       localStream.current?.getTracks().forEach((track) => track.stop());
       pendingIceCandidates.current = [];
       pc.close();
@@ -210,7 +234,7 @@ function VideoCall({ callData, socket }) {
       socket.off("answer", handleAnswer);
       socket.off("iceCandidate", handleIceCandidate);
     };
-  }, [callData, restartConnection, socket]);
+  }, [callData, requiresManualStart, restartConnection, socket]);
 
   const isRemoteVideoBlocked = remoteMediaState === "blocked";
   const isConnectionUnhealthy =
@@ -222,6 +246,14 @@ function VideoCall({ callData, socket }) {
     <div className="container h-[75vh] p-5 text-center items-center justify-center flex flex-col md:flex-row gap-4 md:gap-8 min-w-screen md:mt-10">
       <div className="flex flex-col">
         <div className="flex flex-col justify-center items-center">
+          {callStartNeeded && (
+            <button
+              className="mb-3 rounded bg-green-500 px-4 py-2 text-white"
+              onClick={startCallFromUserGesture}
+            >
+              Start call
+            </button>
+          )}
           <video
             className="w-2xs md:w-[50%]"
             ref={localVideoRef}
