@@ -1,4 +1,3 @@
-import React from "react";
 import Logo from "/logo-2.svg";
 
 const Navbar = ({ onlineCount }) => {

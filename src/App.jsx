@@ -1,22 +1,18 @@
 /* src/App.jsx */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
 } from "react-router-dom";
-import io from "socket.io-client";
 
 import Navbar from "./components/Navbar";
 import InterestForm from "./components/InterestForm";
 import ActiveInterests from "./components/ActiveInterests";
 import VideoCall from "./components/VideoCall";
 import CameraPreview from "./components/CameraPreview";
-
-// Initialize a single Socket.IO instance
-export const socket = io(
-  "https://my-backend-service-257606194123.us-central1.run.app"
-);
+import { API_BASE_URL } from "./config";
+import { socket } from "./socket";
 
 function App() {
   // 1) Removed authentication state
@@ -25,8 +21,8 @@ function App() {
   const [callData, setCallData] = useState(null);
   const [onlineCount, setOnlineCount] = useState(0);
 
-  // 3) Track our own submitted interest record ID
-  const [myInterestId, setMyInterestId] = useState(null);
+  // 3) Track our own submitted interest record
+  const [myInterest, setMyInterest] = useState(null);
 
   // 4) Incoming connection request state
   const [incomingReq, setIncomingReq] = useState(null);
@@ -64,11 +60,6 @@ function App() {
     socket.emit("submitInterest", { interest });
   };
 
-  // 8) When manual‐match REST or auto match succeeds, start the call
-  const handleManualMatch = ({ roomId }) => {
-    setCallData({ roomId, isInitiator: true });
-  };
-
   return (
     <Router basename="/Video-Call-WebApp">
       {/* Yes/No Modal */}
@@ -85,7 +76,9 @@ function App() {
                 onClick={async () => {
                   // YES: call manual match
                   await fetch(
-                    `https://my-backend-service-257606194123.us-central1.run.app/api/interests/${incomingReq.requestId}/match`,
+                    `${API_BASE_URL}/api/interests/${
+                      incomingReq.requesterInterestId || incomingReq.requestId
+                    }/match`,
                     {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
@@ -127,7 +120,7 @@ function App() {
                     socket={socket}
                     onSubmit={handleInterestSubmit}
                     onInterestAccepted={(newRecord) =>
-                      setMyInterestId(newRecord.id)
+                      setMyInterest(newRecord)
                     }
                   />
                   <div className="mt-6">
@@ -142,8 +135,7 @@ function App() {
                 <div className="w-full p-4">
                   <ActiveInterests
                     socket={socket}
-                    onMatch={handleManualMatch}
-                    myInterestId={myInterestId}
+                    myInterest={myInterest}
                   />
                 </div>
               </div>

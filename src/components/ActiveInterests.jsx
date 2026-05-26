@@ -1,10 +1,11 @@
 /* src/components/ActiveInterests.jsx */
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
-export default function ActiveInterests({ socket, onMatch, myInterestId }) {
+export default function ActiveInterests({ socket, myInterest }) {
   const [activeList, setActiveList] = useState([]);
   const [error, setError] = useState("");
   const [matchingId, setMatchingId] = useState(null);
+  const myInterestId = myInterest?.id;
 
   const [mySocketId, setMySocketId] = useState("");
 
@@ -12,6 +13,7 @@ export default function ActiveInterests({ socket, onMatch, myInterestId }) {
     function handleConnect() {
       setMySocketId(socket.id);
     }
+    if (socket.connected) handleConnect();
     socket.on("connect", handleConnect);
     return () => {
       socket.off("connect", handleConnect);
@@ -35,12 +37,18 @@ export default function ActiveInterests({ socket, onMatch, myInterestId }) {
   }, [socket, mySocketId, myInterestId]);
 
   const handleConnect = (item) => {
+    if (!myInterestId) {
+      setError("Submit your interest before connecting.");
+      return;
+    }
     setMatchingId(item.id);
     setError("");
     socket.emit("connectionRequest", {
       targetSocketId: item.socketId,
       requestId: myInterestId,
-      interest: item.interest,
+      requesterInterestId: myInterestId,
+      targetInterestId: item.id,
+      interest: myInterest.interest,
     });
   };
 

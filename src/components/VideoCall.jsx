@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import ChatBox from "./ChatBox"; // import ChatBox
 
 function VideoCall({ callData, socket }) {
@@ -144,7 +144,7 @@ function VideoCall({ callData, socket }) {
             playsInline
             style={{ transform: "scaleX(-1)" }}
           />
-          <h2>Buddy's Camera Preview</h2>
+          <h2>Buddy&apos;s Camera Preview</h2>
         </div>
       </div>
       <div className="h-[100%] w-[50%] flex items-center justify-center">

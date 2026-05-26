@@ -12,6 +12,7 @@ const interestsRouter = require("./routes/interests");
 const rateLimit = require("express-rate-limit");
 
 const app = express();
+const shouldResetDb = process.env.DB_SYNC_FORCE === "true";
 
 app.use((req, _res, next) => {
   console.log(`⬇️  ${req.method} ${req.originalUrl}`);
@@ -53,15 +54,15 @@ sequelize
   .then(() => console.log("PostgreSQL connected"))
   .catch((err) => console.error("PostgreSQL connection error:", err));
 
-// For development: force sync (drops & recreates tables)
 sequelize
-  .sync({ force: true })
+  .sync({ force: shouldResetDb })
   .then(() => console.log("Sequelize models synchronized"))
   .catch((err) => console.error("Error synchronizing Sequelize models:", err));
 
 // Utility: normalize & cosine similarity
 const normalize = (vec) => {
   const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
+  if (!magnitude) return vec;
   return vec.map((val) => val / magnitude);
 };
 const cosineSimilarity = (vecA, vecB) => {
@@ -96,6 +97,35 @@ io.on("connection", (socket) => {
     });
     socket.emit("activeListUpdated", activeList);
   })();
+
+  // Relay connection requests from A to B.
+  socket.on(
+    "connectionRequest",
+    ({
+      targetSocketId,
+      requestId,
+      requesterInterestId,
+      targetInterestId,
+      interest,
+    }) => {
+      socket.to(targetSocketId).emit("incomingRequest", {
+        fromSocketId: socket.id,
+        requestId: requesterInterestId || requestId,
+        requesterInterestId: requesterInterestId || requestId,
+        targetInterestId,
+        interest,
+      });
+    }
+  );
+
+  // Relay denials from B to A. Acceptances are completed through the REST match endpoint.
+  socket.on("connectionResponse", ({ targetSocketId, accepted }) => {
+    if (!accepted) {
+      socket.to(targetSocketId).emit("requestDenied", {
+        fromSocketId: socket.id,
+      });
+    }
+  });
 
   // ─── Handle "submitInterest" ─────────────────────────────────────
   socket.on("submitInterest", async ({ interest }) => {
@@ -144,31 +174,7 @@ io.on("connection", (socket) => {
     // 4) Broadcast updated active list to all clients
     broadcastActiveList();
 
-    // 5) Relay connection requests from A → B
-    socket.on(
-      "connectionRequest",
-      ({ targetSocketId, requestId, interest }) => {
-        // forward to B
-        socket.to(targetSocketId).emit("incomingRequest", {
-          fromSocketId: socket.id,
-          requestId,
-          interest,
-        });
-      }
-    );
-
-    // 6) Relay denials from B → A
-    socket.on("connectionResponse", ({ targetSocketId, accepted }) => {
-      if (!accepted) {
-        // tell A that B said no
-        socket.to(targetSocketId).emit("requestDenied", {
-          fromSocketId: socket.id,
-        });
-      }
-      // if accepted, we do nothing here because B will call the REST match endpoint
-    });
-
-    // 7) Attempt to auto-match
+    // 5) Attempt to auto-match
     let unmatched;
     try {
       unmatched = await Interest.findAll({

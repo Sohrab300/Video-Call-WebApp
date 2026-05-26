@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import EmojiPicker from "emoji-picker-react";
 
 const ChatBox = ({ socket, roomId }) => {

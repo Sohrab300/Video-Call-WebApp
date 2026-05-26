@@ -1,12 +1,20 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 function CameraPreview() {
   const videoRef = useRef(null);
 
   useEffect(() => {
+    let stream;
+    let isMounted = true;
+
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: false })
-      .then((stream) => {
+      .then((mediaStream) => {
+        stream = mediaStream;
+        if (!isMounted || !videoRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
           videoRef.current
@@ -17,6 +25,11 @@ function CameraPreview() {
         };
       })
       .catch((err) => console.error("Error accessing camera:", err));
+
+    return () => {
+      isMounted = false;
+      stream?.getTracks().forEach((track) => track.stop());
+    };
   }, []);
 
   return (

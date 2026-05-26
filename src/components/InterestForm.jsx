@@ -1,5 +1,5 @@
 /* src/components/InterestForm.jsx */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 export default function InterestForm({ socket, onSubmit, onInterestAccepted }) {
   const [interest, setInterest] = useState("");
