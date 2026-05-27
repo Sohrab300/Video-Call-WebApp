@@ -20,10 +20,12 @@ function VideoCall({ callData, socket }) {
   const pendingIceCandidates = useRef([]);
   const startCallRef = useRef(null);
   const localMediaStarted = useRef(false);
+  const facingMode = useRef("user");
   const [requiresManualStart] = useState(() => isIOSDevice());
   const [connectionState, setConnectionState] = useState("connecting");
   const [remoteMediaState, setRemoteMediaState] = useState("waiting");
   const [callStartNeeded, setCallStartNeeded] = useState(requiresManualStart);
+  const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
 
   const resumeRemoteVideo = () => {
     remoteVideoRef.current
@@ -52,6 +54,49 @@ function VideoCall({ callData, socket }) {
       console.error("Error restarting peer connection:", error);
     }
   }, [callData.roomId, socket]);
+
+  const switchCamera = async () => {
+    const pc = peerConnection.current;
+    const currentStream = localStream.current;
+    if (!pc || !currentStream || isSwitchingCamera) return;
+
+    const nextFacingMode = facingMode.current === "user" ? "environment" : "user";
+    setIsSwitchingCamera(true);
+
+    try {
+      const nextStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: nextFacingMode } },
+        audio: false,
+      });
+      const nextVideoTrack = nextStream.getVideoTracks()[0];
+      if (!nextVideoTrack) {
+        nextStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      const sender = pc
+        .getSenders()
+        .find((item) => item.track && item.track.kind === "video");
+      await sender?.replaceTrack(nextVideoTrack);
+
+      currentStream.getVideoTracks().forEach((track) => {
+        currentStream.removeTrack(track);
+        track.stop();
+      });
+      currentStream.addTrack(nextVideoTrack);
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = currentStream;
+        await localVideoRef.current.play();
+      }
+
+      facingMode.current = nextFacingMode;
+    } catch (error) {
+      console.error("Error switching camera:", error);
+    } finally {
+      setIsSwitchingCamera(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -176,7 +221,7 @@ function VideoCall({ callData, socket }) {
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: { facingMode: { ideal: facingMode.current } },
           audio: true,
         });
         if (!isMounted) {
@@ -263,6 +308,15 @@ function VideoCall({ callData, socket }) {
             style={{ transform: "scaleX(-1)" }}
           />
           <h2>Your Camera Preview</h2>
+          <button
+            className="mt-2 flex h-9 w-9 items-center justify-center rounded-full bg-pink-400 text-lg text-white disabled:bg-gray-400"
+            onClick={switchCamera}
+            disabled={callStartNeeded || isSwitchingCamera}
+            aria-label="Switch camera"
+            title="Switch camera"
+          >
+            ⇄
+          </button>
         </div>
         <div className="flex flex-col justify-center items-center">
           <video
@@ -297,7 +351,11 @@ function VideoCall({ callData, socket }) {
         </div>
       </div>
       <div className="h-[100%] w-[50%] flex items-center justify-center">
-        <ChatBox socket={socket} roomId={callData.roomId} />
+        <ChatBox
+          socket={socket}
+          roomId={callData.roomId}
+          peerSocketId={callData.peerSocketId}
+        />
       </div>
     </div>
   );

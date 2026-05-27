@@ -224,10 +224,15 @@ io.on("connection", (socket) => {
       io.to(bestMatch.socketId).socketsJoin(roomId);
 
       // Notify clients
-      socket.emit("matchFound", { roomId, isInitiator: true });
+      socket.emit("matchFound", {
+        roomId,
+        isInitiator: true,
+        peerSocketId: bestMatch.socketId,
+      });
       io.to(bestMatch.socketId).emit("matchFound", {
         roomId,
         isInitiator: false,
+        peerSocketId: socket.id,
       });
 
       // Broadcast list again after matching
@@ -245,9 +250,12 @@ io.on("connection", (socket) => {
   socket.on("iceCandidate", ({ candidate, roomId }) =>
     socket.to(roomId).emit("iceCandidate", { candidate })
   );
-  socket.on("chatMessage", (data) =>
-    socket.to(data.roomId).emit("chatMessage", data)
-  );
+  socket.on("chatMessage", (data) => {
+    socket.to(data.roomId).emit("chatMessage", data);
+    if (data.targetSocketId) {
+      socket.to(data.targetSocketId).emit("chatMessage", data);
+    }
+  });
 
   // ─── User count update ─────────────────────────────────────────────
   io.emit("updateUserCount", io.engine.clientsCount);

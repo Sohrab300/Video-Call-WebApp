@@ -134,10 +134,15 @@ router.post("/:id/match", async (req, res) => {
     if (otherSocket) otherSocket.join(roomId);
 
     // Notify both peers
-    io.to(callerSocketId).emit("matchFound", { roomId, isInitiator: true });
+    io.to(callerSocketId).emit("matchFound", {
+      roomId,
+      isInitiator: true,
+      peerSocketId: otherInterest.socketId,
+    });
     io.to(otherInterest.socketId).emit("matchFound", {
       roomId,
       isInitiator: false,
+      peerSocketId: callerSocketId,
     });
 
     // Re-broadcast updated active list

@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import EmojiPicker from "emoji-picker-react";
 
-const ChatBox = ({ socket, roomId }) => {
+function makeMessageId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+const ChatBox = ({ socket, roomId, peerSocketId }) => {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -14,7 +19,10 @@ const ChatBox = ({ socket, roomId }) => {
   // Listen for chat messages from the server
   useEffect(() => {
     const handleChatMessage = (data) => {
-      setMessages((prev) => [...prev, data]);
+      setMessages((prev) => {
+        if (prev.some((msg) => msg.id === data.id)) return prev;
+        return [...prev, data];
+      });
     };
 
     socket.on("chatMessage", handleChatMessage);
@@ -29,7 +37,9 @@ const ChatBox = ({ socket, roomId }) => {
     if (!message.trim()) return;
 
     const messageData = {
+      id: makeMessageId(),
       roomId,
+      targetSocketId: peerSocketId,
       text: message,
       timestamp: new Date().toISOString(),
       sender: currentUserId, // include sender info
