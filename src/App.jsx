@@ -57,7 +57,26 @@ function App() {
 
   // 7) When someone submits an interest, emit to server
   const handleInterestSubmit = (interest) => {
-    socket.emit("submitInterest", { interest });
+    if (!socket.connected) {
+      return Promise.resolve({
+        success: false,
+        message: "Connection is still starting. Please try again.",
+      });
+    }
+
+    return new Promise((resolve) => {
+      socket.timeout(90000).emit("submitInterest", { interest }, (err, res) => {
+        if (err) {
+          resolve({
+            success: false,
+            message: "This is taking longer than expected. Please try again.",
+          });
+          return;
+        }
+
+        resolve(res);
+      });
+    });
   };
 
   return (

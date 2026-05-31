@@ -1,43 +1,89 @@
 /* src/components/InterestForm.jsx */
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const SUBMIT_TIMEOUT_MS = 90000;
+const WAITING_MESSAGES = [
+  { delay: 0, text: "Preparing matcher..." },
+  { delay: 4000, text: "Generating your interest profile..." },
+  {
+    delay: 12000,
+    text: "This may take up to a minute after the app has been idle.",
+  },
+];
 
 export default function InterestForm({ socket, onSubmit, onInterestAccepted }) {
   const [interest, setInterest] = useState("");
   const [isDisabled, setIsDisabled] = useState(false);
   const [message, setMessage] = useState("");
+  const timersRef = useRef([]);
+
+  const clearTimers = useCallback(() => {
+    timersRef.current.forEach((timer) => clearTimeout(timer));
+    timersRef.current = [];
+  }, []);
+
+  const startWaitingMessages = useCallback(() => {
+    clearTimers();
+    WAITING_MESSAGES.forEach(({ delay, text }) => {
+      const timer = setTimeout(() => setMessage(text), delay);
+      timersRef.current.push(timer);
+    });
+  }, [clearTimers]);
+
+  const finishSubmit = useCallback(() => {
+    clearTimers();
+    setIsDisabled(false);
+  }, [clearTimers]);
 
   useEffect(() => {
-    socket.on("interestAccepted", ({ interest: newRecord }) => {
-      setMessage(
-        "✅ Your interest has been recorded. Please wait while we match you."
-      );
-      setTimeout(() => setIsDisabled(false), 5000);
-      // Now pass the actual DB record so newRecord.id is defined
-      if (onInterestAccepted) onInterestAccepted(newRecord);
-    });
-
     socket.on("interestError", (payload) => {
       setMessage(
         "⚠️ " +
           (payload.message ||
             "Failed to generate embedding. Please submit again.")
       );
-      setIsDisabled(false);
+      finishSubmit();
     });
 
     return () => {
-      socket.off("interestAccepted");
+      clearTimers();
       socket.off("interestError");
     };
-  }, [socket, onInterestAccepted]);
+  }, [finishSubmit, socket, clearTimers]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setIsDisabled(true);
-    setMessage("");
+    startWaitingMessages();
 
-    // Delegate emitting to parent
-    if (onSubmit) onSubmit(interest);
+    const fallbackTimer = setTimeout(() => {
+      setMessage("This is taking longer than expected. Please try again.");
+      finishSubmit();
+    }, SUBMIT_TIMEOUT_MS);
+    timersRef.current.push(fallbackTimer);
+
+    try {
+      const result = await onSubmit?.(interest);
+      if (!result?.success) {
+        setMessage(
+          "⚠️ " +
+            (result?.message ||
+              "Failed to generate embedding. Please submit again.")
+        );
+        finishSubmit();
+        return;
+      }
+
+      setMessage(
+        "✅ Your interest has been recorded. Please wait while we match you."
+      );
+      finishSubmit();
+      if (onInterestAccepted) onInterestAccepted(result.interest);
+    } catch (error) {
+      console.error("Interest submission failed:", error);
+      setMessage("This is taking longer than expected. Please try again.");
+      finishSubmit();
+    }
   };
 
   return (

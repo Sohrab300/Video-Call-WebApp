@@ -128,7 +128,11 @@ io.on("connection", (socket) => {
   });
 
   // ─── Handle "submitInterest" ─────────────────────────────────────
-  socket.on("submitInterest", async ({ interest }) => {
+  socket.on("submitInterest", async ({ interest }, respond) => {
+    const sendSubmitResponse = (payload) => {
+      if (typeof respond === "function") respond(payload);
+    };
+
     console.log(`User ${socket.id} submitted interest: ${interest}`);
 
     // 1) Generate embedding
@@ -137,16 +141,22 @@ io.on("connection", (socket) => {
       embedding = await getEmbedding(interest);
     } catch (err) {
       console.error("Embedding service error:", err);
-      socket.emit("interestError", {
+      const payload = {
+        success: false,
         message: "Embedding service error. Please try again.",
-      });
+      };
+      socket.emit("interestError", payload);
+      sendSubmitResponse(payload);
       return;
     }
     if (!embedding || !Array.isArray(embedding)) {
       console.error("Failed to generate embedding");
-      socket.emit("interestError", {
+      const payload = {
+        success: false,
         message: "Failed to generate embedding. Please submit again.",
-      });
+      };
+      socket.emit("interestError", payload);
+      sendSubmitResponse(payload);
       return;
     }
 
@@ -159,17 +169,27 @@ io.on("connection", (socket) => {
         embedding,
         matched: false,
       });
-      console.log("Interest saved:", newInterest.toJSON());
+      console.log("Interest saved:", {
+        id: newInterest.id,
+        socketId: newInterest.socketId,
+        interest: newInterest.interest,
+        matched: newInterest.matched,
+        roomId: newInterest.roomId,
+      });
     } catch (error) {
       console.error("Database error saving interest:", error);
-      socket.emit("interestError", {
+      const payload = {
+        success: false,
         message: "Database error. Please try again.",
-      });
+      };
+      socket.emit("interestError", payload);
+      sendSubmitResponse(payload);
       return;
     }
 
     // 3) Acknowledge client of success
     socket.emit("interestAccepted", { interest: newInterest });
+    sendSubmitResponse({ success: true, interest: newInterest });
 
     // 4) Broadcast updated active list to all clients
     broadcastActiveList();
