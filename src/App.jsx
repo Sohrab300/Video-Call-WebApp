@@ -14,6 +14,8 @@ import CameraPreview from "./components/CameraPreview";
 import { API_BASE_URL } from "./config";
 import { socket } from "./socket";
 
+const STARTUP_NOTICE_SEEN_KEY = "startupNoticeSeen";
+
 function App() {
   // 1) Removed authentication state
 
@@ -26,11 +28,24 @@ function App() {
 
   // 4) Incoming connection request state
   const [incomingReq, setIncomingReq] = useState(null);
+  const [showStartupNotice, setShowStartupNotice] = useState(false);
 
   useEffect(() => {
+    const startupNoticeTimer = setTimeout(() => {
+      const hasSeenStartupNotice = sessionStorage.getItem(
+        STARTUP_NOTICE_SEEN_KEY
+      );
+
+      if (!socket.connected && !hasSeenStartupNotice) {
+        sessionStorage.setItem(STARTUP_NOTICE_SEEN_KEY, "true");
+        setShowStartupNotice(true);
+      }
+    }, 1200);
+
     // socket: connect, count, matchFound
     socket.on("connect", () => {
       localStorage.setItem("socketId", socket.id);
+      setShowStartupNotice(false);
     });
     socket.on("updateUserCount", setOnlineCount);
     socket.on("matchFound", (data) => {
@@ -47,6 +62,7 @@ function App() {
     });
 
     return () => {
+      clearTimeout(startupNoticeTimer);
       socket.off("connect");
       socket.off("updateUserCount");
       socket.off("matchFound");
@@ -81,6 +97,25 @@ function App() {
 
   return (
     <Router basename="/Video-Call-WebApp">
+      {showStartupNotice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-sm rounded-lg bg-white p-6 text-center shadow-xl">
+            <h2 className="mb-3 text-xl font-semibold">Getting things ready</h2>
+            <p className="text-sm leading-6 text-gray-700">
+              The platform may take a little while to get everything up to
+              speed after being idle. Please stay on this page while we connect
+              you.
+            </p>
+            <button
+              className="mt-5 rounded bg-pink-400 px-4 py-2 text-white"
+              onClick={() => setShowStartupNotice(false)}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Yes/No Modal */}
       {incomingReq && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
