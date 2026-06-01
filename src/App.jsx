@@ -15,6 +15,7 @@ import { API_BASE_URL } from "./config";
 import { socket } from "./socket";
 
 const STARTUP_NOTICE_SEEN_KEY = "startupNoticeSeen";
+const STARTUP_NOTICE_MIN_VISIBLE_MS = 30000;
 
 function App() {
   // 1) Removed authentication state
@@ -29,6 +30,8 @@ function App() {
   // 4) Incoming connection request state
   const [incomingReq, setIncomingReq] = useState(null);
   const [showStartupNotice, setShowStartupNotice] = useState(false);
+  const [startupNoticeCanClose, setStartupNoticeCanClose] = useState(false);
+  const [isBackendConnected, setIsBackendConnected] = useState(socket.connected);
 
   useEffect(() => {
     const startupNoticeTimer = setTimeout(() => {
@@ -45,8 +48,9 @@ function App() {
     // socket: connect, count, matchFound
     socket.on("connect", () => {
       localStorage.setItem("socketId", socket.id);
-      setShowStartupNotice(false);
+      setIsBackendConnected(true);
     });
+    socket.on("disconnect", () => setIsBackendConnected(false));
     socket.on("updateUserCount", setOnlineCount);
     socket.on("matchFound", (data) => {
       setCallData(data);
@@ -64,12 +68,30 @@ function App() {
     return () => {
       clearTimeout(startupNoticeTimer);
       socket.off("connect");
+      socket.off("disconnect");
       socket.off("updateUserCount");
       socket.off("matchFound");
       socket.off("incomingRequest");
       socket.off("requestDenied");
     };
   }, []);
+
+  useEffect(() => {
+    if (!showStartupNotice) return undefined;
+
+    setStartupNoticeCanClose(false);
+    const minimumVisibleTimer = setTimeout(() => {
+      setStartupNoticeCanClose(true);
+    }, STARTUP_NOTICE_MIN_VISIBLE_MS);
+
+    return () => clearTimeout(minimumVisibleTimer);
+  }, [showStartupNotice]);
+
+  useEffect(() => {
+    if (showStartupNotice && startupNoticeCanClose && isBackendConnected) {
+      setShowStartupNotice(false);
+    }
+  }, [isBackendConnected, showStartupNotice, startupNoticeCanClose]);
 
   // 7) When someone submits an interest, emit to server
   const handleInterestSubmit = (interest) => {
