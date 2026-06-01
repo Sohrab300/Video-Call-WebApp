@@ -13,6 +13,11 @@ const rateLimit = require("express-rate-limit");
 
 const app = express();
 const shouldResetDb = process.env.DB_SYNC_FORCE === "true";
+const embeddingWarmupCooldownMs = Number(
+  process.env.EMBEDDING_WARMUP_COOLDOWN_MS || 10 * 60 * 1000
+);
+let embeddingWarmupPromise = null;
+let lastEmbeddingWarmupAt = 0;
 
 app.use((req, _res, next) => {
   console.log(`⬇️  ${req.method} ${req.originalUrl}`);
@@ -85,8 +90,36 @@ async function broadcastActiveList() {
   }
 }
 
+function warmEmbeddingService(reason) {
+  const now = Date.now();
+  if (embeddingWarmupPromise) return embeddingWarmupPromise;
+  if (now - lastEmbeddingWarmupAt < embeddingWarmupCooldownMs) {
+    return Promise.resolve();
+  }
+
+  console.log(`Warming embedding service (${reason})...`);
+  embeddingWarmupPromise = getEmbedding("warm up request")
+    .then((embedding) => {
+      if (embedding) {
+        lastEmbeddingWarmupAt = Date.now();
+        console.log("Embedding service warm-up completed");
+      } else {
+        console.warn("Embedding service warm-up did not complete");
+      }
+    })
+    .catch((err) => {
+      console.error("Embedding service warm-up error:", err);
+    })
+    .finally(() => {
+      embeddingWarmupPromise = null;
+    });
+
+  return embeddingWarmupPromise;
+}
+
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
+  warmEmbeddingService("client connected");
 
   // Send current active list immediately
   (async () => {
@@ -298,14 +331,5 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-
-  setTimeout(async () => {
-    console.log("Warming embedding service...");
-    const embedding = await getEmbedding("warm up request");
-    if (embedding) {
-      console.log("Embedding service warm-up completed");
-    } else {
-      console.warn("Embedding service warm-up did not complete");
-    }
-  }, 1000);
+  setTimeout(() => warmEmbeddingService("server started"), 1000);
 });
