@@ -325,6 +325,17 @@ io.on("connection", (socket) => {
   // ─── User count update ─────────────────────────────────────────────
   io.emit("updateUserCount", io.engine.clientsCount);
 
+  socket.on("disconnecting", () => {
+    const callRooms = [...socket.rooms].filter((roomId) => roomId !== socket.id);
+    callRooms.forEach((roomId) => {
+      socket.to(roomId).emit("callEnded", {
+        roomId,
+        reason: "peerDisconnected",
+        peerSocketId: socket.id,
+      });
+    });
+  });
+
   // ─── Handle disconnect ─────────────────────────────────────────────
   socket.on("disconnect", async () => {
     console.log("Client disconnected:", socket.id);
@@ -336,7 +347,7 @@ io.on("connection", (socket) => {
     }
     try {
       await Interest.destroy({
-        where: { socketId: socket.id, matched: false },
+        where: { socketId: socket.id },
       });
       broadcastActiveList();
     } catch (err) {

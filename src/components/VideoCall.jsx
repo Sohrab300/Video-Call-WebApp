@@ -20,7 +20,22 @@ function isMobileDevice() {
   );
 }
 
-function VideoCall({ callData, socket }) {
+const CHAT_BUTTON_SIZE = 48;
+const CHAT_VIEWPORT_PADDING = 16;
+const CHAT_PANEL_HEIGHT_RATIO = 0.7;
+const CHAT_PANEL_MOBILE_WIDTH_RATIO = 0.8;
+const CHAT_PANEL_TABLET_WIDTH = 448;
+const CHAT_PANEL_MAX_WIDTH = 512;
+const CHAT_DRAG_THRESHOLD = 6;
+const CHAT_DRAG_HINT_DELAY_MS = 1000;
+const CHAT_DRAG_HINT_VISIBLE_MS = 5000;
+const CHAT_DRAG_HINT = "Press and drag to move chat.";
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function VideoCall({ callData, socket, onCallEnded }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
@@ -32,6 +47,9 @@ function VideoCall({ callData, socket }) {
   const facingMode = useRef("user");
   const videoInputDevices = useRef([]);
   const activeVideoDeviceId = useRef(null);
+  const incomingMessageTimerRef = useRef(null);
+  const chatDragRef = useRef(null);
+  const chatDragHintTimerRef = useRef(null);
   const [requiresManualStart] = useState(() => isIOSDevice());
   const [connectionState, setConnectionState] = useState("connecting");
   const [remoteMediaState, setRemoteMediaState] = useState("waiting");
@@ -39,6 +57,69 @@ function VideoCall({ callData, socket }) {
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [canSwitchCamera, setCanSwitchCamera] = useState(() => isMobileDevice());
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [lastIncomingMessage, setLastIncomingMessage] = useState(null);
+  const [chatButtonPosition, setChatButtonPosition] = useState(null);
+  const [isChatButtonDragging, setIsChatButtonDragging] = useState(false);
+  const [showChatDragHint, setShowChatDragHint] = useState(false);
+
+  const getDefaultChatButtonPosition = useCallback(() => {
+    if (typeof window === "undefined") return { x: 0, y: 0 };
+
+    return {
+      x: window.innerWidth - CHAT_BUTTON_SIZE - CHAT_VIEWPORT_PADDING,
+      y: window.innerHeight - CHAT_BUTTON_SIZE - CHAT_VIEWPORT_PADDING,
+    };
+  }, []);
+
+  const clampChatButtonPosition = useCallback((position) => {
+    if (typeof window === "undefined") return position;
+
+    return {
+      x: clamp(
+        position.x,
+        CHAT_VIEWPORT_PADDING,
+        window.innerWidth - CHAT_BUTTON_SIZE - CHAT_VIEWPORT_PADDING
+      ),
+      y: clamp(
+        position.y,
+        CHAT_VIEWPORT_PADDING,
+        window.innerHeight - CHAT_BUTTON_SIZE - CHAT_VIEWPORT_PADDING
+      ),
+    };
+  }, []);
+
+  const chatPanelStyle = (() => {
+    if (typeof window === "undefined") return undefined;
+
+    const buttonPosition = chatButtonPosition || getDefaultChatButtonPosition();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const panelWidth =
+      viewportWidth < 768
+        ? viewportWidth * CHAT_PANEL_MOBILE_WIDTH_RATIO
+        : Math.min(CHAT_PANEL_TABLET_WIDTH, CHAT_PANEL_MAX_WIDTH);
+    const panelHeight = viewportHeight * CHAT_PANEL_HEIGHT_RATIO;
+    const buttonCenterX = buttonPosition.x + CHAT_BUTTON_SIZE / 2;
+    const preferredTop =
+      buttonPosition.y > viewportHeight / 2
+        ? buttonPosition.y - panelHeight - 12
+        : buttonPosition.y + CHAT_BUTTON_SIZE + 12;
+
+    return {
+      left: `${clamp(
+        buttonCenterX - panelWidth / 2,
+        CHAT_VIEWPORT_PADDING,
+        viewportWidth - panelWidth - CHAT_VIEWPORT_PADDING
+      )}px`,
+      top: `${clamp(
+        preferredTop,
+        CHAT_VIEWPORT_PADDING,
+        viewportHeight - panelHeight - CHAT_VIEWPORT_PADDING
+      )}px`,
+      width: `${panelWidth}px`,
+      height: `${panelHeight}px`,
+    };
+  })();
 
   const resumeRemoteVideo = () => {
     remoteVideoRef.current
@@ -49,6 +130,121 @@ function VideoCall({ callData, socket }) {
         setRemoteMediaState("blocked");
       });
   };
+
+  const showIncomingMessagePreview = (message) => {
+    if (incomingMessageTimerRef.current) {
+      clearTimeout(incomingMessageTimerRef.current);
+    }
+
+    setLastIncomingMessage(message);
+    incomingMessageTimerRef.current = setTimeout(() => {
+      setLastIncomingMessage(null);
+      incomingMessageTimerRef.current = null;
+    }, 5000);
+  };
+
+  const clearIncomingMessagePreview = () => {
+    if (incomingMessageTimerRef.current) {
+      clearTimeout(incomingMessageTimerRef.current);
+      incomingMessageTimerRef.current = null;
+    }
+    setLastIncomingMessage(null);
+  };
+
+  const clearChatDragHint = () => {
+    if (chatDragHintTimerRef.current) {
+      clearTimeout(chatDragHintTimerRef.current);
+      chatDragHintTimerRef.current = null;
+    }
+    setShowChatDragHint(false);
+  };
+
+  const openMobileChat = () => {
+    setIsMobileChatOpen(true);
+    clearIncomingMessagePreview();
+    clearChatDragHint();
+  };
+
+  const handleChatButtonPointerDown = (event) => {
+    const currentPosition =
+      chatButtonPosition || getDefaultChatButtonPosition();
+
+    chatDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: currentPosition.x,
+      originY: currentPosition.y,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleChatButtonPointerMove = (event) => {
+    const dragState = chatDragRef.current;
+    if (!dragState) return;
+
+    const deltaX = event.clientX - dragState.startX;
+    const deltaY = event.clientY - dragState.startY;
+    const hasMoved =
+      Math.abs(deltaX) > CHAT_DRAG_THRESHOLD ||
+      Math.abs(deltaY) > CHAT_DRAG_THRESHOLD;
+
+    if (hasMoved) {
+      dragState.moved = true;
+      setIsChatButtonDragging(true);
+      clearChatDragHint();
+    }
+
+    if (!dragState.moved) return;
+
+    setChatButtonPosition(
+      clampChatButtonPosition({
+        x: dragState.originX + deltaX,
+        y: dragState.originY + deltaY,
+      })
+    );
+  };
+
+  const handleChatButtonPointerUp = () => {
+    const dragState = chatDragRef.current;
+    chatDragRef.current = null;
+    setIsChatButtonDragging(false);
+
+    if (dragState?.moved) return;
+    openMobileChat();
+  };
+
+  useEffect(() => {
+    setChatButtonPosition(getDefaultChatButtonPosition());
+
+    const handleResize = () => {
+      setChatButtonPosition((currentPosition) =>
+        clampChatButtonPosition(
+          currentPosition || getDefaultChatButtonPosition()
+        )
+      );
+    };
+
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("orientationchange", handleResize);
+    };
+  }, [clampChatButtonPosition, getDefaultChatButtonPosition]);
+
+  useEffect(() => {
+    chatDragHintTimerRef.current = setTimeout(() => {
+      setShowChatDragHint(true);
+      chatDragHintTimerRef.current = setTimeout(() => {
+        setShowChatDragHint(false);
+        chatDragHintTimerRef.current = null;
+      }, CHAT_DRAG_HINT_VISIBLE_MS);
+    }, CHAT_DRAG_HINT_DELAY_MS);
+
+    return () => clearChatDragHint();
+  }, []);
 
   const startCallFromUserGesture = () => {
     startCallRef.current?.();
@@ -233,11 +429,16 @@ function VideoCall({ callData, socket }) {
       }
     };
 
+    const handleCallEnded = () => {
+      onCallEnded?.();
+    };
+
     // Register signaling listeners before getUserMedia so slow iPad/Safari
     // permission prompts do not miss an early offer from the initiator.
     socket.on("offer", handleOffer);
     socket.on("answer", handleAnswer);
     socket.on("iceCandidate", handleIceCandidate);
+    socket.on("callEnded", handleCallEnded);
 
     const startCall = async () => {
       if (localMediaStarted.current) return;
@@ -311,14 +512,17 @@ function VideoCall({ callData, socket }) {
       isMounted = false;
       startCallRef.current = null;
       localMediaStarted.current = false;
+      clearIncomingMessagePreview();
+      clearChatDragHint();
       localStream.current?.getTracks().forEach((track) => track.stop());
       pendingIceCandidates.current = [];
       pc.close();
       socket.off("offer", handleOffer);
       socket.off("answer", handleAnswer);
       socket.off("iceCandidate", handleIceCandidate);
+      socket.off("callEnded", handleCallEnded);
     };
-  }, [callData, requiresManualStart, restartConnection, socket]);
+  }, [callData, onCallEnded, requiresManualStart, restartConnection, socket]);
 
   const isRemoteVideoBlocked = remoteMediaState === "blocked";
   const isConnectionUnhealthy =
@@ -403,32 +607,62 @@ function VideoCall({ callData, socket }) {
         />
       </div>
       <button
-        className="fixed bottom-5 right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500 text-2xl text-white shadow-lg lg:hidden"
-        onClick={() => setIsMobileChatOpen(true)}
+        className={`fixed z-40 flex h-12 w-12 touch-none select-none items-center justify-center rounded-full bg-blue-500 text-2xl text-white shadow-lg lg:hidden ${
+          isChatButtonDragging ? "cursor-grabbing" : "cursor-grab"
+        }`}
+        style={{
+          left: `${(chatButtonPosition || getDefaultChatButtonPosition()).x}px`,
+          top: `${(chatButtonPosition || getDefaultChatButtonPosition()).y}px`,
+        }}
+        onPointerDown={handleChatButtonPointerDown}
+        onPointerMove={handleChatButtonPointerMove}
+        onPointerUp={handleChatButtonPointerUp}
+        onPointerCancel={() => {
+          chatDragRef.current = null;
+          setIsChatButtonDragging(false);
+        }}
         aria-label="Open chat"
         title="Open chat"
       >
         💬
+        {!isMobileChatOpen && lastIncomingMessage && (
+          <span className="absolute bottom-full right-0 mb-3 max-w-[70vw] rounded bg-gray-200 px-3 py-2 text-left text-sm leading-5 text-gray-900 shadow">
+            {lastIncomingMessage.text}
+          </span>
+        )}
+        {!isMobileChatOpen && !lastIncomingMessage && showChatDragHint && (
+          <span className="absolute bottom-full right-0 mb-3 w-[min(14rem,70vw)] rounded bg-gray-200 px-3 py-2 text-left text-sm leading-5 text-gray-900 shadow">
+            {CHAT_DRAG_HINT}
+          </span>
+        )}
       </button>
-      {isMobileChatOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-end bg-black/30 p-4 lg:hidden">
-          <div className="relative h-[70vh] w-[80vw] max-w-[32rem] rounded-md bg-[#f7f2f3] shadow-xl md:w-[28rem]">
-            <button
-              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-xl text-gray-600 shadow hover:text-gray-900"
-              onClick={() => setIsMobileChatOpen(false)}
-              aria-label="Close chat"
-              title="Close chat"
-            >
-              ×
-            </button>
-            <ChatBox
-              socket={socket}
-              roomId={callData.roomId}
-              peerSocketId={callData.peerSocketId}
-            />
-          </div>
+      <div
+        className={`fixed inset-0 z-50 bg-black/30 lg:hidden ${
+          isMobileChatOpen ? "flex" : "hidden"
+        }`}
+      >
+        <div
+          className="fixed rounded-md bg-[#f7f2f3] shadow-xl"
+          style={chatPanelStyle}
+        >
+          <button
+            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-xl text-gray-600 shadow hover:text-gray-900"
+            onClick={() => setIsMobileChatOpen(false)}
+            aria-label="Close chat"
+            title="Close chat"
+          >
+            ×
+          </button>
+          <ChatBox
+            socket={socket}
+            roomId={callData.roomId}
+            peerSocketId={callData.peerSocketId}
+            onIncomingMessage={(message) => {
+              if (!isMobileChatOpen) showIncomingMessagePreview(message);
+            }}
+          />
         </div>
-      )}
+      </div>
     </div>
   );
 }

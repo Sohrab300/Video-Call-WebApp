@@ -15,6 +15,7 @@ import { socket } from "./socket";
 
 const STARTUP_NOTICE_SEEN_KEY = "startupNoticeSeen";
 const STARTUP_NOTICE_MIN_VISIBLE_MS = 30000;
+const CALL_ENDED_TOAST_MS = 5000;
 
 function App() {
   // 1) Removed authentication state
@@ -31,6 +32,7 @@ function App() {
   const [showStartupNotice, setShowStartupNotice] = useState(false);
   const [startupNoticeCanClose, setStartupNoticeCanClose] = useState(false);
   const [isBackendConnected, setIsBackendConnected] = useState(socket.connected);
+  const [callEndedToast, setCallEndedToast] = useState(null);
 
   useEffect(() => {
     const startupNoticeTimer = setTimeout(() => {
@@ -49,7 +51,10 @@ function App() {
       localStorage.setItem("socketId", socket.id);
       setIsBackendConnected(true);
     });
-    socket.on("disconnect", () => setIsBackendConnected(false));
+    socket.on("disconnect", () => {
+      setIsBackendConnected(false);
+      setCallData(null);
+    });
     socket.on("updateUserCount", setOnlineCount);
     socket.on("matchFound", (data) => {
       setCallData(data);
@@ -85,6 +90,16 @@ function App() {
       setShowStartupNotice(false);
     }
   }, [isBackendConnected, showStartupNotice, startupNoticeCanClose]);
+
+  useEffect(() => {
+    if (!callEndedToast) return undefined;
+
+    const toastTimer = setTimeout(() => {
+      setCallEndedToast(null);
+    }, CALL_ENDED_TOAST_MS);
+
+    return () => clearTimeout(toastTimer);
+  }, [callEndedToast]);
 
   // 7) When someone submits an interest, emit to server
   const handleInterestSubmit = (interest) => {
@@ -187,6 +202,21 @@ function App() {
         </div>
       )}
 
+      {callEndedToast && (
+        <div className="fixed right-4 top-4 z-50 w-[min(22rem,calc(100vw-2rem))] animate-[slideInToast_180ms_ease-out] rounded-lg border border-pink-200 bg-white p-4 pr-12 text-left shadow-xl">
+          <button
+            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full text-xl text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+            onClick={() => setCallEndedToast(null)}
+            aria-label="Dismiss call ended message"
+            title="Dismiss"
+          >
+            ×
+          </button>
+          <p className="text-sm font-semibold text-gray-900">Call ended</p>
+          <p className="mt-2 text-sm text-gray-700">{callEndedToast}</p>
+        </div>
+      )}
+
       <Routes>
         <Route
           path="/"
@@ -209,7 +239,14 @@ function App() {
                   />
                   <div className="mt-6">
                     {callData ? (
-                      <VideoCall callData={callData} socket={socket} />
+                      <VideoCall
+                        callData={callData}
+                        socket={socket}
+                        onCallEnded={() => {
+                          setCallData(null);
+                          setCallEndedToast("The other user left the call.");
+                        }}
+                      />
                     ) : (
                       <CameraPreview />
                     )}

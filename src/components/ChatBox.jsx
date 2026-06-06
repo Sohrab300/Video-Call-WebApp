@@ -6,7 +6,7 @@ function makeMessageId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-const ChatBox = ({ socket, roomId, peerSocketId }) => {
+const ChatBox = ({ socket, roomId, peerSocketId, onIncomingMessage }) => {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -21,6 +21,7 @@ const ChatBox = ({ socket, roomId, peerSocketId }) => {
     const handleChatMessage = (data) => {
       setMessages((prev) => {
         if (prev.some((msg) => msg.id === data.id)) return prev;
+        if (data.sender !== currentUserId) onIncomingMessage?.(data);
         return [...prev, data];
       });
     };
@@ -30,7 +31,7 @@ const ChatBox = ({ socket, roomId, peerSocketId }) => {
     return () => {
       socket.off("chatMessage", handleChatMessage);
     };
-  }, [socket]);
+  }, [currentUserId, onIncomingMessage, socket]);
 
   // Send a message to the server
   const sendMessage = () => {
@@ -88,7 +89,7 @@ const ChatBox = ({ socket, roomId, peerSocketId }) => {
   }, [showEmojiPicker]);
 
   return (
-    <div className="chat-box relative flex h-full max-h-[42rem] min-h-[24rem] w-full max-w-lg flex-col rounded-md bg-[#f7f2f3] p-4">
+    <div className="chat-box relative flex h-full max-h-[42rem] min-h-0 w-full max-w-lg flex-col rounded-md bg-[#f7f2f3] p-4">
       <div className="messages mb-4 min-h-0 flex-1 overflow-y-auto">
         {messages.map((msg, index) => {
           const isCurrentUser = msg.sender === currentUserId;
@@ -108,23 +109,23 @@ const ChatBox = ({ socket, roomId, peerSocketId }) => {
         })}
         <div ref={messagesEndRef} />
       </div>
-      <div className="input-group relative flex" ref={chatInputRef}>
+      <div className="input-group relative flex min-w-0" ref={chatInputRef}>
         <button
-          className="border rounded-l py-2 pl-2.5 border-r-0"
+          className="shrink-0 border rounded-l px-2 py-2 border-r-0"
           onClick={() => setShowEmojiPicker((prev) => !prev)}
         >
           🙂
         </button>
         <input
           type="text"
-          className="border p-2 border-l-0 flex-grow focus:outline-none"
+          className="min-w-0 flex-1 border border-l-0 p-2 focus:outline-none"
           placeholder="Type your message..."
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyPress={handleKeyPress}
         />
         <button
-          className="bg-blue-500 text-white p-2 rounded-r"
+          className="shrink-0 rounded-r bg-blue-500 px-3 py-2 text-white"
           onClick={sendMessage}
         >
           Send
