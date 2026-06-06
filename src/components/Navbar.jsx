@@ -6,10 +6,9 @@ const USERS_ONLINE_HINT_KEY = "usersOnlineHintSeen";
 const USERS_ONLINE_HINT =
   "Click Users online to see who is waiting and send a connection request.";
 
-const Navbar = ({ onlineCount, socket, myInterest }) => {
+const Navbar = ({ onlineCount, socket, myInterest, callData }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showUsersHint, setShowUsersHint] = useState(false);
-  const [isUsersHintPinned, setIsUsersHintPinned] = useState(false);
   const dropdownRef = useRef(null);
   const usersHintTimerRef = useRef(null);
 
@@ -35,7 +34,7 @@ const Navbar = ({ onlineCount, socket, myInterest }) => {
   }, []);
 
   useEffect(() => {
-    if (!isDropdownOpen) return undefined;
+    if (!isDropdownOpen && !showUsersHint) return undefined;
 
     const handleClickOutside = (event) => {
       if (
@@ -43,24 +42,26 @@ const Navbar = ({ onlineCount, socket, myInterest }) => {
         !dropdownRef.current.contains(event.target)
       ) {
         setIsDropdownOpen(false);
-        if (isUsersHintPinned) {
-          setShowUsersHint(false);
-          setIsUsersHintPinned(false);
-        }
+        setShowUsersHint(false);
+        clearUsersHintTimer();
       }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isDropdownOpen, isUsersHintPinned]);
+  }, [isDropdownOpen, showUsersHint]);
+
+  useEffect(() => {
+    if (!callData) return;
+
+    setIsDropdownOpen(false);
+    setShowUsersHint(false);
+    clearUsersHintTimer();
+  }, [callData]);
 
   const togglePinnedHint = () => {
     clearUsersHintTimer();
-    setIsUsersHintPinned((current) => {
-      const next = !current;
-      setShowUsersHint(next);
-      return next;
-    });
+    setShowUsersHint((current) => !current);
   };
 
   return (

@@ -226,6 +226,7 @@ function App() {
                 onlineCount={onlineCount}
                 socket={socket}
                 myInterest={myInterest}
+                callData={callData}
               />
               <div className="flex flex-col">
                 {/* Left side: InterestForm + VideoCall or CameraPreview */}

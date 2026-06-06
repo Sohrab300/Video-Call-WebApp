@@ -640,10 +640,12 @@ function VideoCall({ callData, socket, onCallEnded }) {
         className={`fixed inset-0 z-50 bg-black/30 lg:hidden ${
           isMobileChatOpen ? "flex" : "hidden"
         }`}
+        onClick={() => setIsMobileChatOpen(false)}
       >
         <div
           className="fixed rounded-md bg-[#f7f2f3] shadow-xl"
           style={chatPanelStyle}
+          onClick={(event) => event.stopPropagation()}
         >
           <button
             className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-xl text-gray-600 shadow hover:text-gray-900"
