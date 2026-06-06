@@ -1,15 +1,27 @@
 /* src/components/ActiveInterests.jsx */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { API_BASE_URL } from "../config";
+
+const REQUEST_TIMEOUT_MS = 30000;
 
 export default function ActiveInterests({ socket, myInterest, onlineCount = 0 }) {
   const [activeList, setActiveList] = useState([]);
   const [error, setError] = useState("");
-  const [matchingId, setMatchingId] = useState(null);
+  const [requestingId, setRequestingId] = useState(null);
+  const [connectingId, setConnectingId] = useState(null);
   const [deniedSocketIds, setDeniedSocketIds] = useState(() => new Set());
   const myInterestId = myInterest?.id;
+  const requestTimeoutRef = useRef(null);
+  const requestingIdRef = useRef(null);
 
   const [mySocketId, setMySocketId] = useState("");
+
+  function clearRequestTimeout() {
+    if (requestTimeoutRef.current) {
+      clearTimeout(requestTimeoutRef.current);
+      requestTimeoutRef.current = null;
+    }
+  }
 
   useEffect(() => {
     function handleConnect() {
@@ -58,21 +70,37 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
   useEffect(() => {
     function handleRequestDenied({ fromSocketId }) {
       setDeniedSocketIds((prev) => new Set(prev).add(fromSocketId));
-      setMatchingId(null);
+      clearRequestTimeout();
+      requestingIdRef.current = null;
+      setRequestingId(null);
+      setConnectingId(null);
       setError(`User ${fromSocketId.slice(-6)} declined your request.`);
     }
 
     function handleManualRequestBlocked({ targetSocketId }) {
       setDeniedSocketIds((prev) => new Set(prev).add(targetSocketId));
-      setMatchingId(null);
+      clearRequestTimeout();
+      requestingIdRef.current = null;
+      setRequestingId(null);
+      setConnectingId(null);
       setError("This user declined your request for this session.");
+    }
+
+    function handleMatchFound() {
+      clearRequestTimeout();
+      setConnectingId(requestingIdRef.current);
+      requestingIdRef.current = null;
+      setRequestingId(null);
     }
 
     socket.on("requestDenied", handleRequestDenied);
     socket.on("manualRequestBlocked", handleManualRequestBlocked);
+    socket.on("matchFound", handleMatchFound);
     return () => {
+      clearRequestTimeout();
       socket.off("requestDenied", handleRequestDenied);
       socket.off("manualRequestBlocked", handleManualRequestBlocked);
+      socket.off("matchFound", handleMatchFound);
     };
   }, [socket]);
 
@@ -85,7 +113,10 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
       setError("This user declined your request for this session.");
       return;
     }
-    setMatchingId(item.id);
+    clearRequestTimeout();
+    requestingIdRef.current = item.id;
+    setRequestingId(item.id);
+    setConnectingId(null);
     setError("");
     socket.emit("connectionRequest", {
       targetSocketId: item.socketId,
@@ -94,6 +125,14 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
       targetInterestId: item.id,
       interest: myInterest.interest,
     });
+    requestTimeoutRef.current = setTimeout(() => {
+      setRequestingId((currentId) => (currentId === item.id ? null : currentId));
+      if (requestingIdRef.current === item.id) {
+        requestingIdRef.current = null;
+      }
+      setError("");
+      requestTimeoutRef.current = null;
+    }, REQUEST_TIMEOUT_MS);
   };
 
   const emptyMessage =
@@ -111,6 +150,9 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
       ) : (
         activeList.map((item) => {
           const isDenied = deniedSocketIds.has(item.socketId);
+          const isRequesting = requestingId === item.id;
+          const isConnecting = connectingId === item.id;
+          const isDisabled = isRequesting || isConnecting || isDenied;
           return (
             <div
               key={item.id}
@@ -125,18 +167,20 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
               </div>
               <button
                 onClick={() => handleConnect(item)}
-                disabled={matchingId === item.id || isDenied}
+                disabled={isDisabled}
                 className={`ml-4 px-3 py-1 rounded text-white ${
-                  matchingId === item.id || isDenied
+                  isDisabled
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-green-500 hover:bg-green-600"
                 }`}
               >
                 {isDenied
                   ? "Declined"
-                  : matchingId === item.id
-                    ? "Connecting…"
-                    : "Connect"}
+                  : isConnecting
+                    ? "Connecting..."
+                    : isRequesting
+                      ? "Requesting..."
+                  : "Connect"}
               </button>
             </div>
           );

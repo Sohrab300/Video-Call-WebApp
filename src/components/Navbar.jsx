@@ -37,15 +37,17 @@ const Navbar = ({ onlineCount, socket, myInterest }) => {
         >
           <span>Users online: {onlineCount}</span>
         </button>
-        {isDropdownOpen && (
-          <div className="absolute right-0 top-full z-40 mt-2 max-h-[70vh] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-pink-200 bg-white p-4 text-left shadow-lg">
-            <ActiveInterests
-              socket={socket}
-              myInterest={myInterest}
-              onlineCount={onlineCount}
-            />
-          </div>
-        )}
+        <div
+          className={`absolute right-0 top-full z-40 mt-2 max-h-[70vh] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-pink-200 bg-white p-4 text-left shadow-lg ${
+            isDropdownOpen ? "block" : "hidden"
+          }`}
+        >
+          <ActiveInterests
+            socket={socket}
+            myInterest={myInterest}
+            onlineCount={onlineCount}
+          />
+        </div>
       </div>
     </div>
   );

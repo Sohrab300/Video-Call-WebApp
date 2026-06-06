@@ -38,6 +38,7 @@ function VideoCall({ callData, socket }) {
   const [callStartNeeded, setCallStartNeeded] = useState(requiresManualStart);
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [canSwitchCamera, setCanSwitchCamera] = useState(() => isMobileDevice());
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
 
   const resumeRemoteVideo = () => {
     remoteVideoRef.current
@@ -394,13 +395,40 @@ function VideoCall({ callData, socket }) {
           </div>
         </div>
       </div>
-      <div className="flex min-h-[24rem] w-full items-stretch justify-center lg:min-h-0 lg:flex-1">
+      <div className="hidden min-h-[24rem] w-full items-stretch justify-center lg:flex lg:min-h-0 lg:flex-1">
         <ChatBox
           socket={socket}
           roomId={callData.roomId}
           peerSocketId={callData.peerSocketId}
         />
       </div>
+      <button
+        className="fixed bottom-5 right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-blue-500 text-2xl text-white shadow-lg lg:hidden"
+        onClick={() => setIsMobileChatOpen(true)}
+        aria-label="Open chat"
+        title="Open chat"
+      >
+        💬
+      </button>
+      {isMobileChatOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-end bg-black/30 p-4 lg:hidden">
+          <div className="relative h-[70vh] w-[80vw] max-w-[32rem] rounded-md bg-[#f7f2f3] shadow-xl md:w-[28rem]">
+            <button
+              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-xl text-gray-600 shadow hover:text-gray-900"
+              onClick={() => setIsMobileChatOpen(false)}
+              aria-label="Close chat"
+              title="Close chat"
+            >
+              ×
+            </button>
+            <ChatBox
+              socket={socket}
+              roomId={callData.roomId}
+              peerSocketId={callData.peerSocketId}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
