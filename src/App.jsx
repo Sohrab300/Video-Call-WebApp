@@ -8,7 +8,6 @@ import {
 
 import Navbar from "./components/Navbar";
 import InterestForm from "./components/InterestForm";
-import ActiveInterests from "./components/ActiveInterests";
 import VideoCall from "./components/VideoCall";
 import CameraPreview from "./components/CameraPreview";
 import { API_BASE_URL } from "./config";
@@ -60,11 +59,6 @@ function App() {
     socket.on("incomingRequest", (req) => {
       setIncomingReq(req);
     });
-    // 6) Handle denial
-    socket.on("requestDenied", ({ fromSocketId }) => {
-      alert(`User ${fromSocketId.slice(-6)} denied your request.`);
-    });
-
     return () => {
       clearTimeout(startupNoticeTimer);
       socket.off("connect");
@@ -72,7 +66,6 @@ function App() {
       socket.off("updateUserCount");
       socket.off("matchFound");
       socket.off("incomingRequest");
-      socket.off("requestDenied");
     };
   }, []);
 
@@ -138,17 +131,28 @@ function App() {
         </div>
       )}
 
-      {/* Yes/No Modal */}
+      {/* Incoming connection request toast */}
       {incomingReq && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg shadow-lg fixed top-0 right-0">
-            <p className="mb-4">
+        <div className="fixed right-4 top-4 z-50 w-[min(22rem,calc(100vw-2rem))] animate-[slideInToast_180ms_ease-out] rounded-lg border border-pink-200 bg-white p-4 text-left shadow-xl">
+          <button
+            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full text-xl text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+            onClick={() => setIncomingReq(null)}
+            aria-label="Dismiss request"
+            title="Dismiss request"
+          >
+            ×
+          </button>
+          <div className="pr-8">
+            <p className="text-sm font-semibold text-gray-900">
+              Connection request
+            </p>
+            <p className="mt-2 text-sm text-gray-700">
               User {incomingReq.fromSocketId.slice(-6)} wants to connect
               (interest: <strong>{incomingReq.interest}</strong>).
             </p>
-            <div className="flex justify-end space-x-4">
+            <div className="mt-4 flex justify-end gap-3">
               <button
-                className="px-4 py-2 bg-green-500 text-white rounded"
+                className="rounded bg-green-500 px-4 py-2 text-sm text-white hover:bg-green-600"
                 onClick={async () => {
                   // YES: call manual match
                   await fetch(
@@ -164,10 +168,10 @@ function App() {
                   setIncomingReq(null);
                 }}
               >
-                Yes
+                Accept
               </button>
               <button
-                className="px-4 py-2 bg-red-500 text-white rounded"
+                className="rounded bg-red-500 px-4 py-2 text-sm text-white hover:bg-red-600"
                 onClick={() => {
                   socket.emit("connectionResponse", {
                     targetSocketId: incomingReq.fromSocketId,
@@ -176,7 +180,7 @@ function App() {
                   setIncomingReq(null);
                 }}
               >
-                No
+                Decline
               </button>
             </div>
           </div>
@@ -188,7 +192,11 @@ function App() {
           path="/"
           element={
             <div className="bg-pink-100 min-h-screen min-w-full">
-              <Navbar onlineCount={onlineCount} />
+              <Navbar
+                onlineCount={onlineCount}
+                socket={socket}
+                myInterest={myInterest}
+              />
               <div className="flex flex-col">
                 {/* Left side: InterestForm + VideoCall or CameraPreview */}
                 <div className="flex-1 p-4">
@@ -206,13 +214,6 @@ function App() {
                       <CameraPreview />
                     )}
                   </div>
-                </div>
-                {/* Right side: ActiveInterests */}
-                <div className="w-full p-4">
-                  <ActiveInterests
-                    socket={socket}
-                    myInterest={myInterest}
-                  />
                 </div>
               </div>
             </div>

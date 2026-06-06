@@ -88,8 +88,8 @@ const ChatBox = ({ socket, roomId, peerSocketId }) => {
   }, [showEmojiPicker]);
 
   return (
-    <div className="chat-box bg-[#f7f2f3] rounded-md p-4 max-w-lg w-full h-[85%] relative">
-      <div className="messages h-[87%] overflow-y-scroll mb-4">
+    <div className="chat-box relative flex h-full max-h-[42rem] min-h-[24rem] w-full max-w-lg flex-col rounded-md bg-[#f7f2f3] p-4">
+      <div className="messages mb-4 min-h-0 flex-1 overflow-y-auto">
         {messages.map((msg, index) => {
           const isCurrentUser = msg.sender === currentUserId;
           return (
@@ -108,7 +108,7 @@ const ChatBox = ({ socket, roomId, peerSocketId }) => {
         })}
         <div ref={messagesEndRef} />
       </div>
-      <div className="input-group flex relative" ref={chatInputRef}>
+      <div className="input-group relative flex" ref={chatInputRef}>
         <button
           className="border rounded-l py-2 pl-2.5 border-r-0"
           onClick={() => setShowEmojiPicker((prev) => !prev)}

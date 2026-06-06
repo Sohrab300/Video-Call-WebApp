@@ -18,6 +18,11 @@ const embeddingWarmupCooldownMs = Number(
 );
 let embeddingWarmupPromise = null;
 let lastEmbeddingWarmupAt = 0;
+const deniedManualRequests = new Set();
+
+function manualRequestKey(requesterSocketId, targetSocketId) {
+  return `${requesterSocketId}->${targetSocketId}`;
+}
 
 app.use((req, _res, next) => {
   console.log(`⬇️  ${req.method} ${req.originalUrl}`);
@@ -141,6 +146,12 @@ io.on("connection", (socket) => {
       targetInterestId,
       interest,
     }) => {
+      const blockedKey = manualRequestKey(socket.id, targetSocketId);
+      if (deniedManualRequests.has(blockedKey)) {
+        socket.emit("manualRequestBlocked", { targetSocketId });
+        return;
+      }
+
       socket.to(targetSocketId).emit("incomingRequest", {
         fromSocketId: socket.id,
         requestId: requesterInterestId || requestId,
@@ -154,6 +165,7 @@ io.on("connection", (socket) => {
   // Relay denials from B to A. Acceptances are completed through the REST match endpoint.
   socket.on("connectionResponse", ({ targetSocketId, accepted }) => {
     if (!accepted) {
+      deniedManualRequests.add(manualRequestKey(targetSocketId, socket.id));
       socket.to(targetSocketId).emit("requestDenied", {
         fromSocketId: socket.id,
       });
@@ -317,6 +329,11 @@ io.on("connection", (socket) => {
   socket.on("disconnect", async () => {
     console.log("Client disconnected:", socket.id);
     io.emit("updateUserCount", io.engine.clientsCount);
+    for (const key of deniedManualRequests) {
+      if (key.startsWith(`${socket.id}->`) || key.endsWith(`->${socket.id}`)) {
+        deniedManualRequests.delete(key);
+      }
+    }
     try {
       await Interest.destroy({
         where: { socketId: socket.id, matched: false },

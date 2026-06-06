@@ -11,6 +11,15 @@ function isIOSDevice() {
   );
 }
 
+function isMobileDevice() {
+  if (typeof navigator === "undefined") return false;
+
+  return (
+    isIOSDevice() ||
+    /Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  );
+}
+
 function VideoCall({ callData, socket }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -21,11 +30,14 @@ function VideoCall({ callData, socket }) {
   const startCallRef = useRef(null);
   const localMediaStarted = useRef(false);
   const facingMode = useRef("user");
+  const videoInputDevices = useRef([]);
+  const activeVideoDeviceId = useRef(null);
   const [requiresManualStart] = useState(() => isIOSDevice());
   const [connectionState, setConnectionState] = useState("connecting");
   const [remoteMediaState, setRemoteMediaState] = useState("waiting");
   const [callStartNeeded, setCallStartNeeded] = useState(requiresManualStart);
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const [canSwitchCamera, setCanSwitchCamera] = useState(() => isMobileDevice());
 
   const resumeRemoteVideo = () => {
     remoteVideoRef.current
@@ -60,12 +72,22 @@ function VideoCall({ callData, socket }) {
     const currentStream = localStream.current;
     if (!pc || !currentStream || isSwitchingCamera) return;
 
+    const devices = videoInputDevices.current;
+    const currentDeviceIndex = devices.findIndex(
+      (device) => device.deviceId === activeVideoDeviceId.current
+    );
+    const nextDevice =
+      devices.length > 1
+        ? devices[(currentDeviceIndex + 1) % devices.length]
+        : null;
     const nextFacingMode = facingMode.current === "user" ? "environment" : "user";
     setIsSwitchingCamera(true);
 
     try {
       const nextStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: nextFacingMode } },
+        video: nextDevice
+          ? { deviceId: { exact: nextDevice.deviceId } }
+          : { facingMode: { ideal: nextFacingMode } },
         audio: false,
       });
       const nextVideoTrack = nextStream.getVideoTracks()[0];
@@ -90,6 +112,8 @@ function VideoCall({ callData, socket }) {
         await localVideoRef.current.play();
       }
 
+      activeVideoDeviceId.current =
+        nextVideoTrack.getSettings().deviceId || nextDevice?.deviceId || null;
       facingMode.current = nextFacingMode;
     } catch (error) {
       console.error("Error switching camera:", error);
@@ -230,6 +254,8 @@ function VideoCall({ callData, socket }) {
         }
         console.log("Local stream obtained:", stream);
         localStream.current = stream;
+        activeVideoDeviceId.current =
+          stream.getVideoTracks()[0]?.getSettings().deviceId || null;
 
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
@@ -242,6 +268,18 @@ function VideoCall({ callData, socket }) {
           console.log("Adding local track:", track);
           pc.addTrack(track, stream);
         });
+
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          videoInputDevices.current = devices.filter(
+            (device) => device.kind === "videoinput"
+          );
+          setCanSwitchCamera(
+            isMobileDevice() || videoInputDevices.current.length > 1
+          );
+        } catch (error) {
+          console.error("Error reading media devices:", error);
+        }
 
         resolveLocalMediaReady();
       } catch (err) {
@@ -288,9 +326,9 @@ function VideoCall({ callData, socket }) {
     connectionState === "reconnecting";
 
   return (
-    <div className="container h-[75vh] p-5 text-center items-center justify-center flex flex-col md:flex-row gap-4 md:gap-8 min-w-screen md:mt-10">
-      <div className="flex flex-col">
-        <div className="flex flex-col justify-center items-center">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 text-center lg:min-h-[75vh] lg:flex-row lg:items-stretch lg:justify-center lg:gap-6">
+      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:max-w-2xl lg:grid-cols-1">
+        <div className="flex flex-col items-center">
           {callStartNeeded && (
             <button
               className="mb-3 rounded bg-green-500 px-4 py-2 text-white"
@@ -299,33 +337,39 @@ function VideoCall({ callData, socket }) {
               Start call
             </button>
           )}
-          <video
-            className="w-2xs md:w-[50%]"
-            ref={localVideoRef}
-            autoPlay
-            muted
-            playsInline
-            style={{ transform: "scaleX(-1)" }}
-          />
+          <div className="relative aspect-square w-full max-w-[22rem] overflow-hidden rounded bg-black sm:max-w-[20rem] lg:max-w-[18rem]">
+            <video
+              className="h-full w-full object-contain"
+              ref={localVideoRef}
+              autoPlay
+              muted
+              playsInline
+              style={{ transform: "scaleX(-1)" }}
+            />
+            {canSwitchCamera && (
+              <button
+                className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full bg-black/20 text-2xl text-white backdrop-blur-sm transition hover:bg-black/35 disabled:opacity-50"
+                onClick={switchCamera}
+                disabled={callStartNeeded || isSwitchingCamera}
+                aria-label="Switch camera"
+                title="Switch camera"
+              >
+                ↻
+              </button>
+            )}
+          </div>
           <h2>Your Camera Preview</h2>
-          <button
-            className="mt-2 flex h-9 w-9 items-center justify-center rounded-full bg-pink-400 text-lg text-white disabled:bg-gray-400"
-            onClick={switchCamera}
-            disabled={callStartNeeded || isSwitchingCamera}
-            aria-label="Switch camera"
-            title="Switch camera"
-          >
-            ⇄
-          </button>
         </div>
-        <div className="flex flex-col justify-center items-center">
-          <video
-            className="w-2xs md:w-[50%]"
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            style={{ transform: "scaleX(-1)" }}
-          />
+        <div className="flex flex-col items-center">
+          <div className="aspect-square w-full max-w-[22rem] overflow-hidden rounded bg-black sm:max-w-[20rem] lg:max-w-[18rem]">
+            <video
+              className="h-full w-full object-contain"
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              style={{ transform: "scaleX(-1)" }}
+            />
+          </div>
           <h2>Buddy&apos;s Camera Preview</h2>
           <div className="mt-2 flex min-h-9 items-center justify-center gap-2 text-sm">
             <span className="rounded bg-pink-50 px-2 py-1">
@@ -350,7 +394,7 @@ function VideoCall({ callData, socket }) {
           </div>
         </div>
       </div>
-      <div className="h-[100%] w-[50%] flex items-center justify-center">
+      <div className="flex min-h-[24rem] w-full items-stretch justify-center lg:min-h-0 lg:flex-1">
         <ChatBox
           socket={socket}
           roomId={callData.roomId}

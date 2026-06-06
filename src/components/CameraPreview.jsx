@@ -33,15 +33,17 @@ function CameraPreview() {
   }, []);
 
   return (
-    <div className="container p-5 text-center items-center justify-center flex flex-col min-w-screen md:mt-22">
-      <video
-        className="w-xs md:w-md"
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        style={{ transform: "scaleX(-1)" }}
-      />
+    <div className="mx-auto flex w-full flex-col items-center justify-center p-5 text-center md:mt-22">
+      <div className="aspect-square w-full max-w-[22rem] overflow-hidden rounded bg-black md:max-w-[28rem]">
+        <video
+          className="h-full w-full object-contain"
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          style={{ transform: "scaleX(-1)" }}
+        />
+      </div>
       <h2>Your Camera Preview</h2>
     </div>
   );
