@@ -1,53 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import EmojiPicker from "emoji-picker-react";
 
-function makeMessageId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-const ChatBox = ({ socket, roomId, peerSocketId, onIncomingMessage }) => {
+const ChatBox = ({ messages, currentUserId, onSendMessage }) => {
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([]);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const messagesEndRef = useRef(null);
   const chatInputRef = useRef(null);
 
-  // Get the current user's socket ID for message alignment
-  const currentUserId = socket.id;
-
-  // Listen for chat messages from the server
-  useEffect(() => {
-    const handleChatMessage = (data) => {
-      setMessages((prev) => {
-        if (prev.some((msg) => msg.id === data.id)) return prev;
-        if (data.sender !== currentUserId) onIncomingMessage?.(data);
-        return [...prev, data];
-      });
-    };
-
-    socket.on("chatMessage", handleChatMessage);
-
-    return () => {
-      socket.off("chatMessage", handleChatMessage);
-    };
-  }, [currentUserId, onIncomingMessage, socket]);
-
   // Send a message to the server
   const sendMessage = () => {
-    if (!message.trim()) return;
+    const text = message.trim();
+    if (!text) return;
 
-    const messageData = {
-      id: makeMessageId(),
-      roomId,
-      targetSocketId: peerSocketId,
-      text: message,
-      timestamp: new Date().toISOString(),
-      sender: currentUserId, // include sender info
-    };
-
-    socket.emit("chatMessage", messageData);
-    setMessages((prev) => [...prev, messageData]);
+    onSendMessage(text);
     setMessage("");
     setShowEmojiPicker(false);
   };

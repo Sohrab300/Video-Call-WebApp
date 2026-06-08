@@ -35,6 +35,11 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function makeMessageId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function VideoCall({ callData, socket, onCallEnded }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -61,6 +66,7 @@ function VideoCall({ callData, socket, onCallEnded }) {
   const [chatButtonPosition, setChatButtonPosition] = useState(null);
   const [isChatButtonDragging, setIsChatButtonDragging] = useState(false);
   const [showChatDragHint, setShowChatDragHint] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
 
   const getDefaultChatButtonPosition = useCallback(() => {
     if (typeof window === "undefined") return { x: 0, y: 0 };
@@ -150,6 +156,22 @@ function VideoCall({ callData, socket, onCallEnded }) {
     }
     setLastIncomingMessage(null);
   };
+
+  const sendChatMessage = useCallback(
+    (text) => {
+      const messageData = {
+        id: makeMessageId(),
+        roomId: callData.roomId,
+        text,
+        timestamp: new Date().toISOString(),
+        sender: socket.id,
+      };
+
+      socket.emit("chatMessage", messageData);
+      setChatMessages((prev) => [...prev, messageData]);
+    },
+    [callData.roomId, socket]
+  );
 
   const clearChatDragHint = () => {
     if (chatDragHintTimerRef.current) {
@@ -245,6 +267,21 @@ function VideoCall({ callData, socket, onCallEnded }) {
 
     return () => clearChatDragHint();
   }, []);
+
+  useEffect(() => {
+    const handleChatMessage = (data) => {
+      setChatMessages((prev) => {
+        if (prev.some((msg) => msg.id === data.id)) return prev;
+        if (!isMobileChatOpen) showIncomingMessagePreview(data);
+        return [...prev, data];
+      });
+    };
+
+    socket.on("chatMessage", handleChatMessage);
+    return () => {
+      socket.off("chatMessage", handleChatMessage);
+    };
+  }, [isMobileChatOpen, socket]);
 
   const startCallFromUserGesture = () => {
     startCallRef.current?.();
@@ -601,9 +638,9 @@ function VideoCall({ callData, socket, onCallEnded }) {
       </div>
       <div className="hidden min-h-[24rem] w-full items-stretch justify-center lg:flex lg:min-h-0 lg:flex-1">
         <ChatBox
-          socket={socket}
-          roomId={callData.roomId}
-          peerSocketId={callData.peerSocketId}
+          messages={chatMessages}
+          currentUserId={socket.id}
+          onSendMessage={sendChatMessage}
         />
       </div>
       <button
@@ -656,12 +693,9 @@ function VideoCall({ callData, socket, onCallEnded }) {
             ×
           </button>
           <ChatBox
-            socket={socket}
-            roomId={callData.roomId}
-            peerSocketId={callData.peerSocketId}
-            onIncomingMessage={(message) => {
-              if (!isMobileChatOpen) showIncomingMessagePreview(message);
-            }}
+            messages={chatMessages}
+            currentUserId={socket.id}
+            onSendMessage={sendChatMessage}
           />
         </div>
       </div>

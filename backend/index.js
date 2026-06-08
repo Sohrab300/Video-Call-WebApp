@@ -3,6 +3,7 @@ const express = require("express");
 const http = require("http");
 const socketIo = require("socket.io");
 const cors = require("cors");
+const crypto = require("crypto");
 const sequelize = require("./database");
 const { Op } = require("sequelize");
 const getEmbedding = require("./utils/getEmbedding");
@@ -19,9 +20,51 @@ const embeddingWarmupCooldownMs = Number(
 let embeddingWarmupPromise = null;
 let lastEmbeddingWarmupAt = 0;
 const deniedManualRequests = new Set();
+const manualMatchRequests = new Map();
+const MAX_INTEREST_LENGTH = Number(process.env.MAX_INTEREST_LENGTH || 160);
+const MAX_CHAT_MESSAGE_LENGTH = Number(
+  process.env.MAX_CHAT_MESSAGE_LENGTH || 1000
+);
+const MANUAL_REQUEST_TTL_MS = Number(
+  process.env.MANUAL_REQUEST_TTL_MS || 30 * 1000
+);
+const MATCH_THRESHOLD = Number(process.env.MATCH_THRESHOLD || 0.4);
 
 function manualRequestKey(requesterSocketId, targetSocketId) {
   return `${requesterSocketId}->${targetSocketId}`;
+}
+
+function makeRoomId() {
+  return `room-${Date.now()}-${crypto.randomUUID()}`;
+}
+
+function normalizeInterestInput(value) {
+  if (typeof value !== "string") {
+    return { error: "Interest must be text." };
+  }
+
+  const interest = value.trim();
+  if (!interest) {
+    return { error: "Enter an interest before submitting." };
+  }
+  if (interest.length > MAX_INTEREST_LENGTH) {
+    return {
+      error: `Interest must be ${MAX_INTEREST_LENGTH} characters or fewer.`,
+    };
+  }
+
+  return { interest };
+}
+
+function deleteManualRequestsForSocket(socketId) {
+  for (const [token, request] of manualMatchRequests) {
+    if (
+      request.requesterSocketId === socketId ||
+      request.targetSocketId === socketId
+    ) {
+      manualMatchRequests.delete(token);
+    }
+  }
 }
 
 app.use((req, _res, next) => {
@@ -29,18 +72,25 @@ app.use((req, _res, next) => {
   next();
 });
 
-// CORS (allow localhost:5173 and GitHub Pages)
-app.options("*", cors());
-const allowedOrigins = ["http://localhost:5173", "https://sohrab300.github.io"];
-app.use(
-  cors({
-    origin: (incomingOrigin, callback) => {
-      if (!incomingOrigin) return callback(null, true);
-      if (allowedOrigins.includes(incomingOrigin)) return callback(null, true);
-      return callback(new Error("Not allowed by CORS"), false);
-    },
-  })
-);
+// CORS (allow configured frontend origins)
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+if (!allowedOrigins.length) {
+  allowedOrigins.push("http://localhost:5173", "https://sohrab300.github.io");
+}
+function isAllowedOrigin(incomingOrigin) {
+  return !incomingOrigin || allowedOrigins.includes(incomingOrigin);
+}
+const corsOptions = {
+  origin: (incomingOrigin, callback) => {
+    if (isAllowedOrigin(incomingOrigin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"), false);
+  },
+};
+app.options("*", cors(corsOptions));
+app.use(cors(corsOptions));
 
 // Rate limiter
 const limiter = rateLimit({
@@ -54,10 +104,15 @@ app.use(express.json());
 app.use("/api/interests", interestsRouter);
 
 const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: "*" } });
+const io = socketIo(server, {
+  cors: corsOptions,
+});
 
 // Make Socket.IO available in `req.app.get('io')`
 app.set("io", io);
+app.set("manualMatchRequests", manualMatchRequests);
+app.set("makeRoomId", makeRoomId);
+app.set("broadcastActiveList", broadcastActiveList);
 
 sequelize
   .authenticate()
@@ -139,25 +194,64 @@ io.on("connection", (socket) => {
   // Relay connection requests from A to B.
   socket.on(
     "connectionRequest",
-    ({
-      targetSocketId,
-      requestId,
-      requesterInterestId,
-      targetInterestId,
-      interest,
-    }) => {
+    async ({ targetSocketId }) => {
       const blockedKey = manualRequestKey(socket.id, targetSocketId);
       if (deniedManualRequests.has(blockedKey)) {
         socket.emit("manualRequestBlocked", { targetSocketId });
         return;
       }
 
+      const targetSocket = io.sockets.sockets.get(targetSocketId);
+      if (!targetSocket) {
+        socket.emit("manualRequestUnavailable", { targetSocketId });
+        return;
+      }
+
+      let requesterInterest;
+      let targetInterest;
+      try {
+        [requesterInterest, targetInterest] = await Promise.all([
+          Interest.findOne({
+            where: { socketId: socket.id, matched: false },
+          }),
+          Interest.findOne({
+            where: { socketId: targetSocketId, matched: false },
+          }),
+        ]);
+      } catch (err) {
+        console.error("Error validating connection request:", err);
+        socket.emit("manualRequestUnavailable", { targetSocketId });
+        return;
+      }
+
+      if (!requesterInterest || !targetInterest) {
+        socket.emit("manualRequestUnavailable", { targetSocketId });
+        return;
+      }
+
+      const requestToken = crypto.randomUUID();
+      const expiresAt = Date.now() + MANUAL_REQUEST_TTL_MS;
+      manualMatchRequests.set(requestToken, {
+        requesterSocketId: socket.id,
+        targetSocketId,
+        requesterInterestId: requesterInterest.id,
+        targetInterestId: targetInterest.id,
+        expiresAt,
+      });
+
+      setTimeout(() => {
+        const request = manualMatchRequests.get(requestToken);
+        if (request && request.expiresAt <= Date.now()) {
+          manualMatchRequests.delete(requestToken);
+        }
+      }, MANUAL_REQUEST_TTL_MS + 1000);
+
       socket.to(targetSocketId).emit("incomingRequest", {
         fromSocketId: socket.id,
-        requestId: requesterInterestId || requestId,
-        requesterInterestId: requesterInterestId || requestId,
-        targetInterestId,
-        interest,
+        requestToken,
+        requesterInterestId: requesterInterest.id,
+        targetInterestId: targetInterest.id,
+        interest: requesterInterest.interest,
       });
     }
   );
@@ -177,6 +271,18 @@ io.on("connection", (socket) => {
     const sendSubmitResponse = (payload) => {
       if (typeof respond === "function") respond(payload);
     };
+
+    const normalizedInput = normalizeInterestInput(interest);
+    if (normalizedInput.error) {
+      const payload = {
+        success: false,
+        message: normalizedInput.error,
+      };
+      socket.emit("interestError", payload);
+      sendSubmitResponse(payload);
+      return;
+    }
+    interest = normalizedInput.interest;
 
     console.log(`User ${socket.id} submitted interest: ${interest}`);
 
@@ -263,22 +369,37 @@ io.on("connection", (socket) => {
       }
     });
 
-    const threshold = 0.4;
-    if (bestMatch && bestScore >= threshold) {
-      const roomId = `${interest}-${Date.now()}`;
+    if (bestMatch && bestScore >= MATCH_THRESHOLD) {
+      const roomId = makeRoomId();
+      let matched = false;
       try {
-        await Interest.update(
-          { matched: true, roomId },
-          { where: { id: newInterest.id } }
-        );
-        await Interest.update(
-          { matched: true, roomId },
-          { where: { id: bestMatch.id } }
-        );
+        await sequelize.transaction(async (transaction) => {
+          const [updatedNewCount] = await Interest.update(
+            { matched: true, roomId },
+            {
+              where: { id: newInterest.id, matched: false },
+              transaction,
+            }
+          );
+          const [updatedBestCount] = await Interest.update(
+            { matched: true, roomId },
+            {
+              where: { id: bestMatch.id, matched: false },
+              transaction,
+            }
+          );
+
+          if (updatedNewCount !== 1 || updatedBestCount !== 1) {
+            throw new Error("Interest was already matched");
+          }
+          matched = true;
+        });
       } catch (err) {
         console.error("Error updating matched interests:", err);
         return;
       }
+
+      if (!matched) return;
 
       console.log(
         `Match found in room ${roomId}: ${interest} & ${bestMatch.interest}`
@@ -306,20 +427,31 @@ io.on("connection", (socket) => {
   });
 
   // ─── WebRTC signaling ─────────────────────────────────────────────
-  socket.on("offer", ({ offer, roomId }) =>
-    socket.to(roomId).emit("offer", { offer })
-  );
-  socket.on("answer", ({ answer, roomId }) =>
-    socket.to(roomId).emit("answer", { answer })
-  );
-  socket.on("iceCandidate", ({ candidate, roomId }) =>
-    socket.to(roomId).emit("iceCandidate", { candidate })
-  );
-  socket.on("chatMessage", (data) => {
-    socket.to(data.roomId).emit("chatMessage", data);
-    if (data.targetSocketId) {
-      socket.to(data.targetSocketId).emit("chatMessage", data);
+  socket.on("offer", ({ offer, roomId }) => {
+    if (socket.rooms.has(roomId)) socket.to(roomId).emit("offer", { offer });
+  });
+  socket.on("answer", ({ answer, roomId }) => {
+    if (socket.rooms.has(roomId)) socket.to(roomId).emit("answer", { answer });
+  });
+  socket.on("iceCandidate", ({ candidate, roomId }) => {
+    if (socket.rooms.has(roomId)) {
+      socket.to(roomId).emit("iceCandidate", { candidate });
     }
+  });
+  socket.on("chatMessage", (data) => {
+    if (!data?.roomId || !socket.rooms.has(data.roomId)) return;
+    if (typeof data.text !== "string") return;
+
+    const text = data.text.trim();
+    if (!text || text.length > MAX_CHAT_MESSAGE_LENGTH) return;
+
+    socket.to(data.roomId).emit("chatMessage", {
+      id: data.id,
+      roomId: data.roomId,
+      text,
+      timestamp: data.timestamp,
+      sender: socket.id,
+    });
   });
 
   // ─── User count update ─────────────────────────────────────────────
@@ -327,6 +459,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnecting", () => {
     const callRooms = [...socket.rooms].filter((roomId) => roomId !== socket.id);
+    socket.data.callRooms = callRooms;
     callRooms.forEach((roomId) => {
       socket.to(roomId).emit("callEnded", {
         roomId,
@@ -345,7 +478,22 @@ io.on("connection", (socket) => {
         deniedManualRequests.delete(key);
       }
     }
+    deleteManualRequestsForSocket(socket.id);
     try {
+      const callRooms = socket.data.callRooms || [];
+      await Promise.all(
+        callRooms.map((roomId) =>
+          Interest.update(
+            { matched: false, roomId: null },
+            {
+              where: {
+                roomId,
+                socketId: { [Op.ne]: socket.id },
+              },
+            }
+          )
+        )
+      );
       await Interest.destroy({
         where: { socketId: socket.id },
       });

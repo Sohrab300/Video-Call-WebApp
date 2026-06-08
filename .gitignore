@@ -3,3 +3,5 @@ LOG-SIGN.css
 LogSign.jsx
 .env
 backend/.env
+.DS_Store
+dist/

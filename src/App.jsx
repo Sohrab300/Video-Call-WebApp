@@ -171,13 +171,13 @@ function App() {
                 onClick={async () => {
                   // YES: call manual match
                   await fetch(
-                    `${API_BASE_URL}/api/interests/${
-                      incomingReq.requesterInterestId || incomingReq.requestId
-                    }/match`,
+                    `${API_BASE_URL}/api/interests/match`,
                     {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ socketId: socket.id }),
+                      body: JSON.stringify({
+                        requestToken: incomingReq.requestToken,
+                      }),
                     }
                   );
                   setIncomingReq(null);

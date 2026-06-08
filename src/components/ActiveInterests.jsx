@@ -86,6 +86,14 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
       setError("This user declined your request for this session.");
     }
 
+    function handleManualRequestUnavailable() {
+      clearRequestTimeout();
+      requestingIdRef.current = null;
+      setRequestingId(null);
+      setConnectingId(null);
+      setError("This user is no longer available.");
+    }
+
     function handleMatchFound() {
       clearRequestTimeout();
       setConnectingId(requestingIdRef.current);
@@ -95,11 +103,13 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
 
     socket.on("requestDenied", handleRequestDenied);
     socket.on("manualRequestBlocked", handleManualRequestBlocked);
+    socket.on("manualRequestUnavailable", handleManualRequestUnavailable);
     socket.on("matchFound", handleMatchFound);
     return () => {
       clearRequestTimeout();
       socket.off("requestDenied", handleRequestDenied);
       socket.off("manualRequestBlocked", handleManualRequestBlocked);
+      socket.off("manualRequestUnavailable", handleManualRequestUnavailable);
       socket.off("matchFound", handleMatchFound);
     };
   }, [socket]);
@@ -120,10 +130,6 @@ export default function ActiveInterests({ socket, myInterest, onlineCount = 0 })
     setError("");
     socket.emit("connectionRequest", {
       targetSocketId: item.socketId,
-      requestId: myInterestId,
-      requesterInterestId: myInterestId,
-      targetInterestId: item.id,
-      interest: myInterest.interest,
     });
     requestTimeoutRef.current = setTimeout(() => {
       setRequestingId((currentId) => (currentId === item.id ? null : currentId));

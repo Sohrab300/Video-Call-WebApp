@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const SUBMIT_TIMEOUT_MS = 90000;
+const MAX_INTEREST_LENGTH = 160;
 const WAITING_MESSAGES = [
   { delay: 0, text: "Preparing matcher..." },
   { delay: 4000, text: "Generating your interest profile..." },
@@ -102,6 +103,7 @@ export default function InterestForm({ socket, onSubmit, onInterestAccepted }) {
             value={interest}
             className="bg-pink-50 rounded-md mx-2"
             onChange={(e) => setInterest(e.target.value)}
+            maxLength={MAX_INTEREST_LENGTH}
             required
           />
           <button

@@ -2,63 +2,10 @@
 
 const express = require("express");
 const router = express.Router();
-const { Op } = require("sequelize");
 const Interest = require("../models/Interest");
-const getEmbedding = require("../utils/getEmbedding"); // ← Import your real embedding utility
 
 // ================================================
-// 1) Helper to Create a Unique Room ID
-// ================================================
-function makeRoomId() {
-  return `room-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-}
-
-// ================================================
-// 2) POST /api/interests/ - Save a new interest with embedding
-// ================================================
-router.post("/", async (req, res) => {
-  try {
-    const { socketId, interest } = req.body;
-
-    if (!socketId || !interest) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing socketId or interest",
-      });
-    }
-
-    const embedding = await getEmbedding(interest);
-    if (!embedding || !Array.isArray(embedding)) {
-      return res.status(500).json({
-        success: false,
-        message: "Embedding generation failed. Please submit again.",
-      });
-    }
-
-    const newInterest = await Interest.create({
-      socketId,
-      interest,
-      embedding,
-      matched: false,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message:
-        "Your interest has been received. Please wait while we try to match you.",
-      data: newInterest,
-    });
-  } catch (error) {
-    console.error("Error saving interest:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Server error saving interest",
-    });
-  }
-});
-
-// ================================================
-// 3) GET /api/interests/active - List all unmatched interests
+// 1) GET /api/interests/active - List all unmatched interests
 // ================================================
 router.get("/active", async (req, res) => {
   try {
@@ -78,63 +25,84 @@ router.get("/active", async (req, res) => {
 });
 
 // ================================================
-// 4) POST /api/interests/:id/match - Manually match two users
+// 2) POST /api/interests/match - Manually match two users
 // ================================================
-router.post("/:id/match", async (req, res) => {
+router.post("/match", async (req, res) => {
   console.log("🕵️ manual-match called:", {
-    otherId: req.params.id,
-    callerSocketId: req.body.socketId,
+    requestToken: req.body.requestToken ? "[provided]" : "[missing]",
   });
 
   try {
-    const otherId = req.params.id;
-    const { socketId: callerSocketId } = req.body;
+    const { requestToken } = req.body;
 
-    if (!callerSocketId) {
+    if (!requestToken) {
       return res.status(400).json({
         success: false,
-        error: "Missing callerSocketId in request body",
+        error: "Missing request token",
       });
     }
 
-    const callerInterest = await Interest.findOne({
-      where: { socketId: callerSocketId, matched: false },
-    });
-    if (!callerInterest) {
+    const manualMatchRequests = req.app.get("manualMatchRequests");
+    const request = manualMatchRequests.get(requestToken);
+
+    if (!request || request.expiresAt <= Date.now()) {
+      manualMatchRequests.delete(requestToken);
       return res.status(404).json({
         success: false,
-        error: "Your own interest not found or already matched",
+        error: "Connection request expired or not found",
       });
     }
 
-    const otherInterest = await Interest.findOne({
-      where: { id: otherId, matched: false },
-    });
-    if (!otherInterest) {
-      return res.status(404).json({
-        success: false,
-        error: "Selected interest not found or already matched",
-      });
-    }
+    manualMatchRequests.delete(requestToken);
 
-    const roomId = makeRoomId();
+    let callerInterest;
+    let otherInterest;
+    const roomId = req.app.get("makeRoomId")();
     await Interest.sequelize.transaction(async (t) => {
-      await callerInterest.update(
+      callerInterest = await Interest.findOne({
+        where: {
+          id: request.requesterInterestId,
+          socketId: request.requesterSocketId,
+          matched: false,
+        },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+      otherInterest = await Interest.findOne({
+        where: {
+          id: request.targetInterestId,
+          socketId: request.targetSocketId,
+          matched: false,
+        },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!callerInterest || !otherInterest) {
+        throw new Error("Interest not found or already matched");
+      }
+
+      await Interest.update(
         { matched: true, roomId },
-        { transaction: t }
+        {
+          where: {
+            id: [callerInterest.id, otherInterest.id],
+            matched: false,
+          },
+          transaction: t,
+        }
       );
-      await otherInterest.update({ matched: true, roomId }, { transaction: t });
     });
 
     const io = req.app.get("io");
     // Join both sockets into the room
-    const callerSocket = io.sockets.sockets.get(callerSocketId);
+    const callerSocket = io.sockets.sockets.get(request.requesterSocketId);
     if (callerSocket) callerSocket.join(roomId);
     const otherSocket = io.sockets.sockets.get(otherInterest.socketId);
     if (otherSocket) otherSocket.join(roomId);
 
     // Notify both peers
-    io.to(callerSocketId).emit("matchFound", {
+    io.to(request.requesterSocketId).emit("matchFound", {
       roomId,
       isInitiator: true,
       peerSocketId: otherInterest.socketId,
@@ -142,16 +110,11 @@ router.post("/:id/match", async (req, res) => {
     io.to(otherInterest.socketId).emit("matchFound", {
       roomId,
       isInitiator: false,
-      peerSocketId: callerSocketId,
+      peerSocketId: request.requesterSocketId,
     });
 
     // Re-broadcast updated active list
-    const activeList = await Interest.findAll({
-      where: { matched: false },
-      attributes: ["id", "socketId", "interest", "createdAt"],
-      order: [["createdAt", "ASC"]],
-    });
-    io.emit("activeListUpdated", activeList);
+    await req.app.get("broadcastActiveList")();
 
     return res.status(200).json({
       success: true,
@@ -171,40 +134,6 @@ router.post("/:id/match", async (req, res) => {
       success: false,
       error: "Server error during match",
     });
-  }
-});
-
-// ================================================
-// 5) GET /api/interests - (Existing) Auto-match by interest string
-// ================================================
-router.get("/", async (req, res) => {
-  try {
-    const { interest, socketId } = req.query;
-    const found = await Interest.findOne({
-      where: { interest, matched: false, socketId: { [Op.ne]: socketId } },
-    });
-    return res.status(200).json(found);
-  } catch (error) {
-    console.error("Error retrieving interest:", error);
-    return res.status(500).json({ error: "Server error retrieving interest" });
-  }
-});
-
-// ================================================
-// 6) PUT /api/interests/:id - (Existing) Update matched & roomId
-// ================================================
-router.put("/:id", async (req, res) => {
-  try {
-    const { matched, roomId } = req.body;
-    await Interest.update(
-      { matched, roomId },
-      { where: { id: req.params.id } }
-    );
-    const updatedInterest = await Interest.findByPk(req.params.id);
-    return res.status(200).json(updatedInterest);
-  } catch (error) {
-    console.error("Error updating interest:", error);
-    return res.status(500).json({ error: "Server error updating interest" });
   }
 });
 
