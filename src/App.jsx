@@ -1,5 +1,5 @@
 /* src/App.jsx */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -16,6 +16,7 @@ import { socket } from "./socket";
 const STARTUP_NOTICE_SEEN_KEY = "startupNoticeSeen";
 const STARTUP_NOTICE_MIN_VISIBLE_MS = 30000;
 const CALL_ENDED_TOAST_MS = 5000;
+const SIGNALING_RECONNECT_GRACE_MS = 20000;
 
 function App() {
   // 1) Removed authentication state
@@ -33,6 +34,12 @@ function App() {
   const [startupNoticeCanClose, setStartupNoticeCanClose] = useState(false);
   const [isBackendConnected, setIsBackendConnected] = useState(socket.connected);
   const [callEndedToast, setCallEndedToast] = useState(null);
+  const callDataRef = useRef(callData);
+  const signalingDisconnectTimerRef = useRef(null);
+
+  useEffect(() => {
+    callDataRef.current = callData;
+  }, [callData]);
 
   useEffect(() => {
     const startupNoticeTimer = setTimeout(() => {
@@ -47,13 +54,40 @@ function App() {
     }, 1200);
 
     // socket: connect, count, matchFound
+    const clearSignalingDisconnectTimer = () => {
+      if (signalingDisconnectTimerRef.current) {
+        clearTimeout(signalingDisconnectTimerRef.current);
+        signalingDisconnectTimerRef.current = null;
+      }
+    };
+
     socket.on("connect", () => {
+      const wasRecoveringCall = Boolean(signalingDisconnectTimerRef.current);
+      clearSignalingDisconnectTimer();
       localStorage.setItem("socketId", socket.id);
       setIsBackendConnected(true);
+
+      if (wasRecoveringCall && callDataRef.current && socket.recovered === false) {
+        setCallData(null);
+        setCallEndedToast(
+          "The signaling connection was reset. Please connect again."
+        );
+      }
     });
     socket.on("disconnect", () => {
       setIsBackendConnected(false);
-      setCallData(null);
+
+      if (!callDataRef.current || signalingDisconnectTimerRef.current) return;
+
+      signalingDisconnectTimerRef.current = setTimeout(() => {
+        signalingDisconnectTimerRef.current = null;
+        if (!socket.connected && callDataRef.current) {
+          setCallData(null);
+          setCallEndedToast(
+            "The signaling connection was lost. Please connect again."
+          );
+        }
+      }, SIGNALING_RECONNECT_GRACE_MS);
     });
     socket.on("updateUserCount", setOnlineCount);
     socket.on("matchFound", (data) => {
@@ -66,6 +100,7 @@ function App() {
     });
     return () => {
       clearTimeout(startupNoticeTimer);
+      clearSignalingDisconnectTimer();
       socket.off("connect");
       socket.off("disconnect");
       socket.off("updateUserCount");

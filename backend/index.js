@@ -29,6 +29,10 @@ const MANUAL_REQUEST_TTL_MS = Number(
   process.env.MANUAL_REQUEST_TTL_MS || 30 * 1000
 );
 const MATCH_THRESHOLD = Number(process.env.MATCH_THRESHOLD || 0.4);
+const CALL_DISCONNECT_GRACE_MS = Number(
+  process.env.CALL_DISCONNECT_GRACE_MS || 20 * 1000
+);
+const pendingCallDisconnects = new Map();
 
 function manualRequestKey(requesterSocketId, targetSocketId) {
   return `${requesterSocketId}->${targetSocketId}`;
@@ -65,6 +69,70 @@ function deleteManualRequestsForSocket(socketId) {
       manualMatchRequests.delete(token);
     }
   }
+}
+
+function deleteDeniedRequestsForSocket(socketId) {
+  for (const key of deniedManualRequests) {
+    if (key.startsWith(`${socketId}->`) || key.endsWith(`->${socketId}`)) {
+      deniedManualRequests.delete(key);
+    }
+  }
+}
+
+async function cleanupDisconnectedSocket(socketId, callRooms = []) {
+  deleteDeniedRequestsForSocket(socketId);
+  deleteManualRequestsForSocket(socketId);
+
+  try {
+    await Promise.all(
+      callRooms.map((roomId) =>
+        Interest.update(
+          { matched: false, roomId: null },
+          {
+            where: {
+              roomId,
+              socketId: { [Op.ne]: socketId },
+            },
+          }
+        )
+      )
+    );
+    await Interest.destroy({
+      where: { socketId },
+    });
+    await broadcastActiveList();
+  } catch (err) {
+    console.error("Error cleaning up interests on disconnect:", err);
+  }
+}
+
+function cancelPendingCallDisconnect(socketId) {
+  const pendingDisconnect = pendingCallDisconnects.get(socketId);
+  if (!pendingDisconnect) return false;
+
+  clearTimeout(pendingDisconnect.timer);
+  pendingCallDisconnects.delete(socketId);
+  return true;
+}
+
+function scheduleCallDisconnectCleanup(socketId, callRooms) {
+  cancelPendingCallDisconnect(socketId);
+
+  const timer = setTimeout(async () => {
+    pendingCallDisconnects.delete(socketId);
+
+    callRooms.forEach((roomId) => {
+      io.to(roomId).emit("callEnded", {
+        roomId,
+        reason: "peerDisconnected",
+        peerSocketId: socketId,
+      });
+    });
+
+    await cleanupDisconnectedSocket(socketId, callRooms);
+  }, CALL_DISCONNECT_GRACE_MS);
+
+  pendingCallDisconnects.set(socketId, { timer, callRooms });
 }
 
 app.use((req, _res, next) => {
@@ -106,6 +174,10 @@ app.use("/api/interests", interestsRouter);
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: corsOptions,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: CALL_DISCONNECT_GRACE_MS,
+    skipMiddlewares: true,
+  },
 });
 
 // Make Socket.IO available in `req.app.get('io')`
@@ -178,7 +250,11 @@ function warmEmbeddingService(reason) {
 }
 
 io.on("connection", (socket) => {
-  console.log("New client connected:", socket.id);
+  const recoveredCall = socket.recovered && cancelPendingCallDisconnect(socket.id);
+  console.log("New client connected:", socket.id, {
+    recovered: socket.recovered,
+    recoveredCall,
+  });
   warmEmbeddingService("client connected");
 
   // Send current active list immediately
@@ -460,47 +536,23 @@ io.on("connection", (socket) => {
   socket.on("disconnecting", () => {
     const callRooms = [...socket.rooms].filter((roomId) => roomId !== socket.id);
     socket.data.callRooms = callRooms;
-    callRooms.forEach((roomId) => {
-      socket.to(roomId).emit("callEnded", {
-        roomId,
-        reason: "peerDisconnected",
-        peerSocketId: socket.id,
-      });
-    });
   });
 
   // ─── Handle disconnect ─────────────────────────────────────────────
-  socket.on("disconnect", async () => {
-    console.log("Client disconnected:", socket.id);
+  socket.on("disconnect", async (reason) => {
+    const callRooms = socket.data.callRooms || [];
+    console.log("Client disconnected:", socket.id, {
+      reason,
+      callRooms,
+    });
     io.emit("updateUserCount", io.engine.clientsCount);
-    for (const key of deniedManualRequests) {
-      if (key.startsWith(`${socket.id}->`) || key.endsWith(`->${socket.id}`)) {
-        deniedManualRequests.delete(key);
-      }
+
+    if (callRooms.length) {
+      scheduleCallDisconnectCleanup(socket.id, callRooms);
+      return;
     }
-    deleteManualRequestsForSocket(socket.id);
-    try {
-      const callRooms = socket.data.callRooms || [];
-      await Promise.all(
-        callRooms.map((roomId) =>
-          Interest.update(
-            { matched: false, roomId: null },
-            {
-              where: {
-                roomId,
-                socketId: { [Op.ne]: socket.id },
-              },
-            }
-          )
-        )
-      );
-      await Interest.destroy({
-        where: { socketId: socket.id },
-      });
-      broadcastActiveList();
-    } catch (err) {
-      console.error("Error cleaning up interests on disconnect:", err);
-    }
+
+    await cleanupDisconnectedSocket(socket.id);
   });
 });
 
