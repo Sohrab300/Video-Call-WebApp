@@ -30,6 +30,9 @@ const CHAT_DRAG_THRESHOLD = 6;
 const CHAT_DRAG_HINT_DELAY_MS = 1000;
 const CHAT_DRAG_HINT_VISIBLE_MS = 5000;
 const CHAT_DRAG_HINT = "Press and drag to move chat.";
+const MEDIA_HEALTH_CHECK_MS = 3000;
+const TRACK_MUTE_RECOVERY_MS = 8000;
+const CONNECTION_RECOVERY_MS = 6000;
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -38,6 +41,21 @@ function clamp(value, min, max) {
 function makeMessageId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeFacingMode(value, fallback = "user") {
+  if (value === "environment" || value === "user") return value;
+  return fallback;
+}
+
+async function playVideoElement(videoElement, onBlocked) {
+  if (!videoElement) return;
+
+  try {
+    await videoElement.play();
+  } catch (error) {
+    onBlocked?.(error);
+  }
 }
 
 function VideoCall({ callData, socket, onCallEnded }) {
@@ -55,9 +73,14 @@ function VideoCall({ callData, socket, onCallEnded }) {
   const incomingMessageTimerRef = useRef(null);
   const chatDragRef = useRef(null);
   const chatDragHintTimerRef = useRef(null);
+  const localMediaRecoveryRef = useRef(null);
+  const localTrackMutedAtRef = useRef(null);
+  const connectionRecoveryTimerRef = useRef(null);
   const [requiresManualStart] = useState(() => isIOSDevice());
   const [connectionState, setConnectionState] = useState("connecting");
   const [remoteMediaState, setRemoteMediaState] = useState("waiting");
+  const [localMediaState, setLocalMediaState] = useState("waiting");
+  const [localFacingMode, setLocalFacingMode] = useState(facingMode.current);
   const [callStartNeeded, setCallStartNeeded] = useState(requiresManualStart);
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [canSwitchCamera, setCanSwitchCamera] = useState(() => isMobileDevice());
@@ -128,12 +151,13 @@ function VideoCall({ callData, socket, onCallEnded }) {
   })();
 
   const resumeRemoteVideo = () => {
-    remoteVideoRef.current
-      ?.play()
-      .then(() => setRemoteMediaState("playing"))
-      .catch((error) => {
+    playVideoElement(remoteVideoRef.current, (error) => {
         console.error("Error resuming remote video:", error);
         setRemoteMediaState("blocked");
+      }).then(() => {
+        if (remoteVideoRef.current && !remoteVideoRef.current.paused) {
+          setRemoteMediaState("playing");
+        }
       });
   };
 
@@ -306,24 +330,26 @@ function VideoCall({ callData, socket, onCallEnded }) {
     const currentStream = localStream.current;
     if (!pc || !currentStream || isSwitchingCamera) return;
 
-    const devices = videoInputDevices.current;
-    const currentDeviceIndex = devices.findIndex(
-      (device) => device.deviceId === activeVideoDeviceId.current
-    );
-    const nextDevice =
-      devices.length > 1
-        ? devices[(currentDeviceIndex + 1) % devices.length]
-        : null;
     const nextFacingMode = facingMode.current === "user" ? "environment" : "user";
     setIsSwitchingCamera(true);
 
     try {
-      const nextStream = await navigator.mediaDevices.getUserMedia({
-        video: nextDevice
-          ? { deviceId: { exact: nextDevice.deviceId } }
-          : { facingMode: { ideal: nextFacingMode } },
-        audio: false,
-      });
+      let nextStream;
+      try {
+        nextStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: nextFacingMode } },
+          audio: false,
+        });
+      } catch (exactFacingModeError) {
+        console.warn(
+          "Exact facingMode switch failed; retrying with ideal facingMode:",
+          exactFacingModeError
+        );
+        nextStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: nextFacingMode } },
+          audio: false,
+        });
+      }
       const nextVideoTrack = nextStream.getVideoTracks()[0];
       if (!nextVideoTrack) {
         nextStream.getTracks().forEach((track) => track.stop());
@@ -343,12 +369,20 @@ function VideoCall({ callData, socket, onCallEnded }) {
 
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = currentStream;
-        await localVideoRef.current.play();
+        await playVideoElement(localVideoRef.current, (error) => {
+          console.error("Error playing switched local video:", error);
+        });
       }
 
       activeVideoDeviceId.current =
-        nextVideoTrack.getSettings().deviceId || nextDevice?.deviceId || null;
-      facingMode.current = nextFacingMode;
+        nextVideoTrack.getSettings().deviceId || null;
+      facingMode.current = normalizeFacingMode(
+        nextVideoTrack.getSettings().facingMode,
+        nextFacingMode
+      );
+      setLocalFacingMode(facingMode.current);
+      localTrackMutedAtRef.current = null;
+      setLocalMediaState("live");
     } catch (error) {
       console.error("Error switching camera:", error);
     } finally {
@@ -365,6 +399,132 @@ function VideoCall({ callData, socket, onCallEnded }) {
 
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     peerConnection.current = pc;
+
+    const getLocalMediaStream = () =>
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: facingMode.current } },
+        audio: true,
+      });
+
+    const attachLocalTrackHandlers = (stream) => {
+      stream.getVideoTracks().forEach((track) => {
+        track.addEventListener("mute", () => {
+          localTrackMutedAtRef.current = Date.now();
+          setLocalMediaState("interrupted");
+        });
+        track.addEventListener("unmute", () => {
+          localTrackMutedAtRef.current = null;
+          setLocalMediaState("live");
+        });
+        track.addEventListener("ended", () => {
+          setLocalMediaState("recovering");
+          recoverLocalMedia("local video track ended");
+        });
+      });
+    };
+
+    const updateVideoDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        videoInputDevices.current = devices.filter(
+          (device) => device.kind === "videoinput"
+        );
+        setCanSwitchCamera(
+          isMobileDevice() || videoInputDevices.current.length > 1
+        );
+      } catch (error) {
+        console.error("Error reading media devices:", error);
+      }
+    };
+
+    const applyLocalStream = async (stream, { replaceTracks = false } = {}) => {
+      const previousStream = localStream.current;
+      localStream.current = stream;
+      activeVideoDeviceId.current =
+        stream.getVideoTracks()[0]?.getSettings().deviceId || null;
+      facingMode.current = normalizeFacingMode(
+        stream.getVideoTracks()[0]?.getSettings().facingMode,
+        facingMode.current
+      );
+      setLocalFacingMode(facingMode.current);
+      attachLocalTrackHandlers(stream);
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        await playVideoElement(localVideoRef.current, (error) => {
+          console.error("Error playing local video:", error);
+        });
+      }
+
+      if (replaceTracks) {
+        for (const track of stream.getTracks()) {
+          const sender = pc
+            .getSenders()
+            .find((item) => item.track && item.track.kind === track.kind);
+          if (sender) {
+            await sender.replaceTrack(track);
+          } else {
+            pc.addTrack(track, stream);
+          }
+        }
+        previousStream?.getTracks().forEach((track) => track.stop());
+      } else {
+        stream.getTracks().forEach((track) => {
+          console.log("Adding local track:", track);
+          pc.addTrack(track, stream);
+        });
+      }
+
+      localTrackMutedAtRef.current = null;
+      setLocalMediaState("live");
+      await updateVideoDevices();
+    };
+
+    async function recoverLocalMedia(reason) {
+      if (localMediaRecoveryRef.current) return localMediaRecoveryRef.current;
+
+      console.warn("Recovering local media:", reason);
+      setLocalMediaState("recovering");
+      localMediaRecoveryRef.current = getLocalMediaStream()
+        .then((stream) => {
+          if (!isMounted) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          return applyLocalStream(stream, { replaceTracks: true });
+        })
+        .catch((error) => {
+          console.error("Error recovering local media:", error);
+          setLocalMediaState("blocked");
+        })
+        .finally(() => {
+          localMediaRecoveryRef.current = null;
+        });
+
+      return localMediaRecoveryRef.current;
+    }
+
+    const scheduleConnectionRecovery = () => {
+      if (connectionRecoveryTimerRef.current) return;
+
+      connectionRecoveryTimerRef.current = setTimeout(() => {
+        connectionRecoveryTimerRef.current = null;
+        const currentPc = peerConnection.current;
+        if (
+          currentPc &&
+          ["disconnected", "failed"].includes(currentPc.connectionState)
+        ) {
+          restartConnection();
+        }
+      }, CONNECTION_RECOVERY_MS);
+    };
+
+    const clearConnectionRecovery = () => {
+      if (connectionRecoveryTimerRef.current) {
+        clearTimeout(connectionRecoveryTimerRef.current);
+        connectionRecoveryTimerRef.current = null;
+      }
+    };
 
     const flushPendingIceCandidates = async () => {
       if (!pc.remoteDescription) return;
@@ -384,6 +544,23 @@ function VideoCall({ callData, socket, onCallEnded }) {
       console.log("Remote track event:", event);
       if (!remoteVideoRef.current) return;
 
+      event.track.addEventListener("mute", () => {
+        setRemoteMediaState("interrupted");
+        scheduleConnectionRecovery();
+      });
+      event.track.addEventListener("unmute", () => {
+        setRemoteMediaState("playing");
+        clearConnectionRecovery();
+        playVideoElement(remoteVideoRef.current, (error) => {
+          console.error("Error resuming remote video:", error);
+          setRemoteMediaState("blocked");
+        });
+      });
+      event.track.addEventListener("ended", () => {
+        setRemoteMediaState("interrupted");
+        scheduleConnectionRecovery();
+      });
+
       if (event.streams && event.streams[0]) {
         remoteVideoRef.current.srcObject = event.streams[0];
       } else {
@@ -392,12 +569,13 @@ function VideoCall({ callData, socket, onCallEnded }) {
         remoteVideoRef.current.srcObject = remoteStream.current;
       }
 
-      remoteVideoRef.current
-        .play()
-        .then(() => setRemoteMediaState("playing"))
-        .catch((err) => {
+      playVideoElement(remoteVideoRef.current, (err) => {
           console.error("Error playing remote video:", err);
           setRemoteMediaState("blocked");
+        }).then(() => {
+          if (remoteVideoRef.current && !remoteVideoRef.current.paused) {
+            setRemoteMediaState("playing");
+          }
         });
     };
 
@@ -414,12 +592,19 @@ function VideoCall({ callData, socket, onCallEnded }) {
     pc.onconnectionstatechange = () => {
       console.log("Peer connection state:", pc.connectionState);
       setConnectionState(pc.connectionState);
+      if (["connected", "completed"].includes(pc.connectionState)) {
+        clearConnectionRecovery();
+      } else if (["disconnected", "failed"].includes(pc.connectionState)) {
+        scheduleConnectionRecovery();
+      }
     };
 
     pc.oniceconnectionstatechange = () => {
       console.log("ICE connection state:", pc.iceConnectionState);
-      if (pc.iceConnectionState === "failed" && pc.signalingState === "stable") {
-        restartConnection();
+      if (["connected", "completed"].includes(pc.iceConnectionState)) {
+        clearConnectionRecovery();
+      } else if (["disconnected", "failed"].includes(pc.iceConnectionState)) {
+        scheduleConnectionRecovery();
       }
     };
 
@@ -483,46 +668,20 @@ function VideoCall({ callData, socket, onCallEnded }) {
       setCallStartNeeded(false);
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode.current } },
-          audio: true,
-        });
+        const stream = await getLocalMediaStream();
         if (!isMounted) {
           stream.getTracks().forEach((track) => track.stop());
           return;
         }
         console.log("Local stream obtained:", stream);
-        localStream.current = stream;
-        activeVideoDeviceId.current =
-          stream.getVideoTracks()[0]?.getSettings().deviceId || null;
-
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-          localVideoRef.current
-            .play()
-            .catch((err) => console.error("Error playing local video:", err));
-        }
-
-        stream.getTracks().forEach((track) => {
-          console.log("Adding local track:", track);
-          pc.addTrack(track, stream);
-        });
-
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          videoInputDevices.current = devices.filter(
-            (device) => device.kind === "videoinput"
-          );
-          setCanSwitchCamera(
-            isMobileDevice() || videoInputDevices.current.length > 1
-          );
-        } catch (error) {
-          console.error("Error reading media devices:", error);
-        }
+        await applyLocalStream(stream);
 
         resolveLocalMediaReady();
       } catch (err) {
         console.error("Error accessing media devices.", err);
+        setLocalMediaState("blocked");
+        localMediaStarted.current = false;
+        setCallStartNeeded(true);
         resolveLocalMediaReady();
         return;
       }
@@ -544,6 +703,45 @@ function VideoCall({ callData, socket, onCallEnded }) {
     startCallRef.current = startCall;
     if (!requiresManualStart) startCall();
 
+    const mediaHealthTimer = setInterval(() => {
+      const stream = localStream.current;
+      const localVideo = localVideoRef.current;
+      if (!stream) return;
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack || videoTrack.readyState === "ended") {
+        recoverLocalMedia("missing or ended local video track");
+        return;
+      }
+
+      if (videoTrack.muted) {
+        if (!localTrackMutedAtRef.current) {
+          localTrackMutedAtRef.current = Date.now();
+        }
+        setLocalMediaState("interrupted");
+        if (Date.now() - localTrackMutedAtRef.current >= TRACK_MUTE_RECOVERY_MS) {
+          recoverLocalMedia("local video track muted too long");
+        }
+        return;
+      }
+
+      localTrackMutedAtRef.current = null;
+      setLocalMediaState("live");
+
+      if (localVideo?.srcObject && localVideo.paused) {
+        playVideoElement(localVideo, (error) => {
+          console.error("Error resuming local video:", error);
+        });
+      }
+
+      if (remoteVideoRef.current?.srcObject && remoteVideoRef.current.paused) {
+        playVideoElement(remoteVideoRef.current, (error) => {
+          console.error("Error resuming remote video:", error);
+          setRemoteMediaState("blocked");
+        });
+      }
+    }, MEDIA_HEALTH_CHECK_MS);
+
     // Cleanup on component unmount
     return () => {
       isMounted = false;
@@ -551,6 +749,8 @@ function VideoCall({ callData, socket, onCallEnded }) {
       localMediaStarted.current = false;
       clearIncomingMessagePreview();
       clearChatDragHint();
+      clearInterval(mediaHealthTimer);
+      clearConnectionRecovery();
       localStream.current?.getTracks().forEach((track) => track.stop());
       pendingIceCandidates.current = [];
       pc.close();
@@ -586,7 +786,10 @@ function VideoCall({ callData, socket, onCallEnded }) {
               autoPlay
               muted
               playsInline
-              style={{ transform: "scaleX(-1)" }}
+              style={{
+                transform:
+                  localFacingMode === "user" ? "scaleX(-1)" : "scaleX(1)",
+              }}
             />
             {canSwitchCamera && (
               <button
@@ -601,6 +804,13 @@ function VideoCall({ callData, socket, onCallEnded }) {
             )}
           </div>
           <h2>Your Camera Preview</h2>
+          <div className="mt-2 min-h-7 text-sm">
+            {localMediaState !== "live" && (
+              <span className="rounded bg-pink-50 px-2 py-1">
+                camera {localMediaState}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex flex-col items-center">
           <div className="aspect-square w-full max-w-[22rem] overflow-hidden rounded bg-black sm:max-w-[20rem] lg:max-w-[18rem]">
@@ -609,7 +819,6 @@ function VideoCall({ callData, socket, onCallEnded }) {
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              style={{ transform: "scaleX(-1)" }}
             />
           </div>
           <h2>Buddy&apos;s Camera Preview</h2>
@@ -617,6 +826,11 @@ function VideoCall({ callData, socket, onCallEnded }) {
             <span className="rounded bg-pink-50 px-2 py-1">
               {connectionState}
             </span>
+            {remoteMediaState === "interrupted" && (
+              <span className="rounded bg-yellow-100 px-2 py-1 text-yellow-800">
+                video interrupted
+              </span>
+            )}
             {isRemoteVideoBlocked && (
               <button
                 className="rounded bg-blue-500 px-3 py-1 text-white"
